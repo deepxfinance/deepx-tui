@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "deepx": {
+      "command": "bun",
+      "args": ["run", "--silent", "mcp:deepx"],
+      "cwd": "/home/stone/Web/deepx-tui",
+      "type": "stdio",
+      "trust": false,
+      "description": "DeepX order tools for Gemini CLI"
+    }
+  }
+}
