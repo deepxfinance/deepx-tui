@@ -1,21 +1,17 @@
-#!/usr/bin/env bun
-
-import process from 'node:process';
-
 import {
   cancelOrderTool,
   listOpenOrdersDryRun,
   listSupportedMarkets,
   placeOrderTool,
-} from '../src/services/order-tools';
+} from './order-tools';
 
-type JsonRpcRequest = {
+export type JsonRpcRequest = {
   id?: string | number | null;
   method: string;
   params?: Record<string, unknown>;
 };
 
-type JsonRpcResponse = {
+export type JsonRpcResponse = {
   jsonrpc: '2.0';
   id: string | number | null;
   result?: unknown;
@@ -25,12 +21,19 @@ type JsonRpcResponse = {
   };
 };
 
-const serverInfo = {
+export const supportedProtocolVersions = [
+  '2025-11-25',
+  '2025-06-18',
+  '2025-03-26',
+  '2024-11-05',
+] as const;
+
+export const serverInfo = {
   name: 'deepx-mcp',
   version: '0.1.0',
 };
 
-const tools = [
+export const tools = [
   {
     name: 'deepx_list_markets',
     description:
@@ -110,97 +113,98 @@ const tools = [
       },
     },
   },
-];
+] as const;
 
-let buffer = '';
-
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', (chunk) => {
-  buffer += chunk;
-  consumeMessages();
-});
-
-process.stdin.on('end', () => {
-  process.exit(0);
-});
-
-function consumeMessages() {
-  while (true) {
-    const headerEnd = buffer.indexOf('\r\n\r\n');
-    if (headerEnd === -1) {
-      return;
-    }
-
-    const header = buffer.slice(0, headerEnd);
-    const contentLength = parseContentLength(header);
-    const messageEnd = headerEnd + 4 + contentLength;
-
-    if (buffer.length < messageEnd) {
-      return;
-    }
-
-    const body = buffer.slice(headerEnd + 4, messageEnd);
-    buffer = buffer.slice(messageEnd);
-    void handleMessage(body);
-  }
-}
-
-function parseContentLength(header: string): number {
-  const match = header.match(/Content-Length:\s*(\d+)/i);
-  if (!match) {
-    throw new Error('Missing Content-Length header.');
+function negotiateProtocolVersion(version: unknown) {
+  if (typeof version !== 'string' || version.length === 0) {
+    return supportedProtocolVersions[0];
   }
 
-  return Number(match[1]);
+  if (
+    supportedProtocolVersions.includes(
+      version as (typeof supportedProtocolVersions)[number],
+    )
+  ) {
+    return version;
+  }
+
+  return null;
 }
 
-async function handleMessage(body: string) {
-  const request = JSON.parse(body) as JsonRpcRequest;
-
+export async function handleMcpRequest(
+  request: JsonRpcRequest,
+): Promise<JsonRpcResponse | null> {
   if (request.method === 'notifications/initialized') {
-    return;
+    return null;
   }
 
   if (request.method === 'initialize') {
-    writeResponse({
+    const protocolVersion = negotiateProtocolVersion(
+      request.params?.protocolVersion,
+    );
+
+    if (!protocolVersion) {
+      return {
+        jsonrpc: '2.0',
+        id: request.id ?? null,
+        error: {
+          code: -32602,
+          message: `Unsupported protocol version: ${String(request.params?.protocolVersion ?? '')}`,
+        },
+      };
+    }
+
+    return {
       jsonrpc: '2.0',
       id: request.id ?? null,
       result: {
-        protocolVersion: '2024-11-05',
+        protocolVersion,
         capabilities: {
-          tools: {},
+          tools: {
+            listChanged: false,
+          },
         },
         serverInfo,
+        instructions:
+          'Use DeepX tools for market lookup and order dry-runs. Live perp execution requires confirm=true and an unlocked wallet passphrase.',
       },
-    });
-    return;
+    };
   }
 
   if (request.method === 'ping') {
-    writeResponse({
+    return {
       jsonrpc: '2.0',
       id: request.id ?? null,
       result: {},
-    });
-    return;
+    };
   }
 
   if (request.method === 'tools/list') {
-    writeResponse({
+    return {
       jsonrpc: '2.0',
       id: request.id ?? null,
       result: { tools },
-    });
-    return;
+    };
   }
 
   if (request.method === 'tools/call') {
     const name = String(request.params?.name ?? '');
     const args = (request.params?.arguments ?? {}) as Record<string, unknown>;
 
+    if (!tools.some((tool) => tool.name === name)) {
+      return {
+        jsonrpc: '2.0',
+        id: request.id ?? null,
+        error: {
+          code: -32602,
+          message: `Unknown tool: ${name}`,
+        },
+      };
+    }
+
     try {
       const result = await callTool(name, args);
-      writeResponse({
+      return {
         jsonrpc: '2.0',
         id: request.id ?? null,
         result: {
@@ -210,10 +214,12 @@ async function handleMessage(body: string) {
               text: JSON.stringify(result, null, 2),
             },
           ],
+          structuredContent: result,
+          isError: false,
         },
-      });
+      };
     } catch (error) {
-      writeResponse({
+      return {
         jsonrpc: '2.0',
         id: request.id ?? null,
         result: {
@@ -225,19 +231,18 @@ async function handleMessage(body: string) {
             },
           ],
         },
-      });
+      };
     }
-    return;
   }
 
-  writeResponse({
+  return {
     jsonrpc: '2.0',
     id: request.id ?? null,
     error: {
       code: -32601,
       message: `Method not found: ${request.method}`,
     },
-  });
+  };
 }
 
 async function callTool(name: string, args: Record<string, unknown>) {
@@ -278,11 +283,4 @@ async function callTool(name: string, args: Record<string, unknown>) {
     default:
       throw new Error(`Unknown tool "${name}".`);
   }
-}
-
-function writeResponse(response: JsonRpcResponse) {
-  const json = JSON.stringify(response);
-  process.stdout.write(
-    `Content-Length: ${Buffer.byteLength(json, 'utf8')}\r\n\r\n${json}`,
-  );
 }

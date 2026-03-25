@@ -40,6 +40,7 @@ bun test
 - The AI chat panel shells out to local `gemini-cli` and expects that CLI to be installed and authenticated
 - `bun run mcp:deepx` starts a local stdio MCP server with DeepX order tools for Gemini CLI
 - `bun run mcp:probe` performs a local MCP handshake and confirms that the tool catalog is visible over stdio
+- The MCP server negotiates protocol versions with current clients and currently accepts `2025-11-25`, `2025-06-18`, and `2024-11-05`
 - `deepx_place_order` and `deepx_cancel_order` can submit live perp transactions when `confirm=true` and a wallet `passphrase` are provided, or when the same active session has already unlocked the wallet
 - The current build uses a real wallet import flow and a live market dashboard fed by DeepX HTTP and websocket data
 - The repository is intentionally small so feature work can be added incrementally
