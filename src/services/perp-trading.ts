@@ -1,6 +1,7 @@
 import { Contract, JsonRpcProvider, parseUnits, Wallet } from 'ethers';
 
 import { getNetworkConfig, type RuntimeNetwork } from '../config/networks';
+import { logNetworkRequest, logNetworkResponse } from './logger';
 import { decryptPrivateKey, readWalletRecord } from './wallet-store';
 
 const PERP_CONTRACT_ADDRESS = '0x000000000000000000000000000000000000044E';
@@ -121,20 +122,18 @@ export async function placePerpOrderLive(input: PlacePerpOrderInput): Promise<{
     gasLimit: 1000000n,
   });
 
-  const relay = await submitRelayTransaction({
+  const txHash = await submitRpcTransaction({
     network,
-    action: 'PlaceOrder',
+    provider,
     signedTx,
-    signer: signer.address,
   });
 
   return {
     status: 'submitted',
     network: network.id,
     pair: input.pair,
-    txHash: relay.tx_hash,
-    orderId: relay.order_id,
-    explorerUrl: `${network.explorerUrl}/tx/${relay.tx_hash}`,
+    txHash,
+    explorerUrl: `${network.explorerUrl}/tx/${txHash}`,
     summary: `${network.shortLabel} ${input.side} ${input.size} ${input.pair} ${input.type}`,
   };
 }
@@ -178,19 +177,18 @@ export async function cancelPerpOrderLive(
     gasLimit: 1000000n,
   });
 
-  const relay = await submitRelayTransaction({
+  const txHash = await submitRpcTransaction({
     network,
-    action: 'CancelOrder',
+    provider,
     signedTx,
-    signer: signer.address,
   });
 
   return {
     status: 'submitted',
     network: network.id,
     pair: input.pair,
-    txHash: relay.tx_hash,
-    explorerUrl: `${network.explorerUrl}/tx/${relay.tx_hash}`,
+    txHash,
+    explorerUrl: `${network.explorerUrl}/tx/${txHash}`,
     summary: `${network.shortLabel} cancel order ${input.orderId} on ${input.pair}`,
   };
 }
@@ -225,39 +223,58 @@ function parsePositiveDecimal(
   return parseUnits(normalized, decimals);
 }
 
-async function submitRelayTransaction(input: {
+async function submitRpcTransaction(input: {
   network: ReturnType<typeof getNetworkConfig>;
-  action: 'PlaceOrder' | 'CancelOrder';
+  provider: JsonRpcProvider;
   signedTx: string;
-  signer: string;
 }) {
-  const response = await fetch(`${input.network.appUrl}/v2/chain/tx/transact`, {
+  logNetworkRequest({
+    scope: 'rpc',
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      accept: '*/*',
-    },
+    url: input.network.rpcUrl,
     body: JSON.stringify({
-      action: input.action,
-      marketType: 'Perp',
+      method: 'eth_sendRawTransaction',
       signedTx: input.signedTx,
-      signer: input.signer,
     }),
   });
+  try {
+    const response = await input.provider.broadcastTransaction(input.signedTx);
+    logNetworkResponse({
+      scope: 'rpc',
+      method: 'POST',
+      url: input.network.rpcUrl,
+      status: 200,
+      body: JSON.stringify({
+        txHash: response.hash,
+      }),
+    });
+    return response.hash;
+  } catch (error) {
+    const message = formatRpcFailureMessage(error);
+    logNetworkResponse({
+      scope: 'rpc',
+      method: 'POST',
+      url: input.network.rpcUrl,
+      status: 500,
+      body: message,
+    });
+    throw new Error(message, { cause: error });
+  }
+}
 
-  if (!response.ok) {
-    throw new Error(`Relay request failed with status ${response.status}.`);
+export function getTransactionSubmissionRpcUrl(
+  network: ReturnType<typeof getNetworkConfig>,
+) {
+  return network.rpcUrl;
+}
+
+export function formatRpcFailureMessage(error: unknown) {
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    if (message) {
+      return `RPC transaction submission failed: ${message}`;
+    }
   }
 
-  const payload = (await response.json()) as {
-    code?: number;
-    msg?: string;
-    data?: { tx_hash: string; order_id?: string };
-  };
-
-  if (!payload.data?.tx_hash) {
-    throw new Error(payload.msg ?? 'Relay response did not include tx_hash.');
-  }
-
-  return payload.data;
+  return 'RPC transaction submission failed.';
 }

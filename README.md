@@ -17,6 +17,7 @@ bun install -g .
 
 ```bash
 bun run dev
+./bin/deepx --mode debug
 ```
 
 Or run the command entry directly:
@@ -52,14 +53,18 @@ bun test
    - realtime candle chart with volume bars
    - orderbook panel
    - recent trades panel
-   - AI chat panel powered by the in-process DeepX agent using `@google/genai` and `gemini-3-flash-previous`
+   - AI chat panel powered by the in-process DeepX agent using `@google/genai` and `gemini-3-flash-preview`
+   - bottom status panel with CLI version and websocket delay
+   - optional debug panel with filtered internal logs when `--mode debug` is enabled
 
 ## AI Chat
 
 - Set `GEMINI_API_KEY` or `GOOGLE_API_KEY` before launching the TUI to enable live chat replies
 - The chat agent runs in-process and can call the built-in DeepX tools directly
 - Supported tools currently cover market discovery plus order place, cancel, and open-order lookup flows
-- AI chat is advisory-only for trading actions and will not perform live order submission or cancellation
+- Simple order commands like `buy 0.001 ETH` are parsed locally against the active pair and require a separate `confirm` before real submission
+- AI chat can submit live perp orders with explicit confirmation and an unlocked session wallet, but still blocks AI-driven cancels
+- `--mode debug` enables a filtered debug panel for app, relay, HTTP, and websocket logs
 
 ## Next Steps
 

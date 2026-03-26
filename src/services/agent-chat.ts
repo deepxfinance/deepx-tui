@@ -1,10 +1,12 @@
 import process from 'node:process';
 
 import {
+  type Candidate,
   type Content,
   type FunctionCall,
   type GenerateContentParameters,
   GoogleGenAI,
+  type Part,
 } from '@google/genai';
 
 import {
@@ -17,7 +19,7 @@ import {
   executeDeepxAgentTool,
 } from './agent-tools';
 
-export const GENAI_MODEL = 'gemini-3-flash-previous';
+export const GENAI_MODEL = 'gemini-3-flash-preview';
 
 const MAX_TOOL_ROUNDS = 4;
 
@@ -25,9 +27,11 @@ type AgentContext = {
   pairLabel: string;
   priceLabel: string;
   resolutionLabel: string;
+  walletUnlocked: boolean;
 };
 
 type GenAiResponseLike = {
+  candidates?: Candidate[];
   text?: string;
   functionCalls?: FunctionCall[];
 };
@@ -79,16 +83,7 @@ export async function requestAgentChat(input: {
 
     contents = [
       ...contents,
-      {
-        role: 'model',
-        parts: functionCalls.map((call) => ({
-          functionCall: {
-            id: call.id,
-            name: call.name,
-            args: call.args,
-          },
-        })),
-      },
+      buildModelToolCallContent(response, functionCalls),
       {
         role: 'user',
         parts: await Promise.all(
@@ -125,6 +120,26 @@ export function normalizeAgentText(text?: string) {
   return (text ?? '').trim();
 }
 
+function buildModelToolCallContent(
+  response: GenAiResponseLike,
+  functionCalls: Array<Required<Pick<FunctionCall, 'name'>> & FunctionCall>,
+): Content {
+  const candidateParts = response.candidates?.[0]?.content?.parts;
+  const functionCallParts = candidateParts?.filter((part) => part.functionCall);
+
+  if (functionCallParts && functionCallParts.length === functionCalls.length) {
+    return {
+      role: 'model',
+      parts: functionCallParts,
+    };
+  }
+
+  return {
+    role: 'model',
+    parts: functionCalls.map((call) => buildFunctionCallPart(call)),
+  };
+}
+
 function normalizeFunctionCalls(
   functionCalls?: FunctionCall[],
 ): Array<Required<Pick<FunctionCall, 'name'>> & FunctionCall> {
@@ -146,10 +161,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function buildFunctionCallPart(call: FunctionCall): Part {
+  return {
+    functionCall: {
+      id: call.id,
+      name: call.name,
+      args: call.args,
+    },
+  };
+}
+
 async function executeToolCall(call: FunctionCall) {
   try {
     return {
-      output: await executeDeepxAgentTool(call.name ?? '', call.args ?? {}),
+      output: await executeDeepxAgentTool(call.name ?? '', call.args ?? {}, {
+        allowLiveExecution: call.name === 'deepx_place_order',
+      }),
     };
   } catch (error) {
     return {

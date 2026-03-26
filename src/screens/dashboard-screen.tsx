@@ -4,37 +4,56 @@ import type { FC, ReactNode } from 'react';
 import { useMemo, useState } from 'react';
 
 import { CandleChart } from '../components/chart/candle-chart';
+import { DebugPanel } from '../components/debug-panel';
 import type { NetworkConfig } from '../config/networks';
+import { CLI_VERSION } from '../lib/cli-version';
 import {
   appendChatMessage,
   createInitialChatMessages,
   getVisibleChatMessages,
 } from '../lib/dashboard-chat';
 import {
+  cycleFocusTarget,
   type DashboardFocusTarget,
   formatChatComposerLine,
   getPairKindShortcut,
 } from '../lib/dashboard-input';
+import {
+  formatWebSocketDelay,
+  getWebSocketDelayTone,
+} from '../lib/dashboard-status';
+import { formatErrorMessage, formatErrorWithStack } from '../lib/error-format';
 import { padRight, truncateMiddle } from '../lib/format';
 import { GENAI_MODEL, requestAgentChat } from '../services/agent-chat';
+import {
+  buildTradeIntentConfirmationMessage,
+  isTradeConfirmationMessage,
+  type ParsedChatTradeIntent,
+  parseChatTradeIntent,
+} from '../services/chat-trade-intent';
+import { logError, logInfo } from '../services/logger';
 import type { PairKind } from '../services/market-catalog';
+import { placeOrderTool } from '../services/order-tools';
 import { useMarketData } from '../services/use-market-data';
 
 type DashboardScreenProps = {
+  mode: 'default' | 'debug';
   network: NetworkConfig;
   walletAddress: string;
 };
 
 type FocusTarget = DashboardFocusTarget;
-
-const focusOrder: FocusTarget[] = ['pairs', 'chart', 'orderbook', 'chat'];
 const resolutions = ['1', '5', '15', '30', '60', '240', '1D', '1W', '1M'];
 const UP_COLOR = '#28DE9C';
 const DOWN_COLOR = '#FF3131';
 const PANEL_GAP = 0;
 const CHAT_INPUT_HEIGHT = 3;
+const TOP_BAR_HEIGHT = 6;
+const FOOTER_HEIGHT = 3;
+const FRAME_PADDING_Y = 1;
 
 export const DashboardScreen: FC<DashboardScreenProps> = ({
+  mode,
   network,
   walletAddress,
 }) => {
@@ -44,8 +63,11 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
   const [focusTarget, setFocusTarget] = useState<FocusTarget>('pairs');
   const [resolution, setResolution] = useState('15');
   const [chatInput, setChatInput] = useState('');
+  const [debugFilter, setDebugFilter] = useState('');
   const [chatMessages, setChatMessages] = useState(createInitialChatMessages);
   const [isChatLoading, setIsChatLoading] = useState(false);
+  const [pendingChatTrade, setPendingChatTrade] =
+    useState<ParsedChatTradeIntent>();
   const {
     pairGroups,
     activePair,
@@ -58,6 +80,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     candleStreamStatus,
     candleError,
     orderbookError,
+    websocketDelayMs,
   } = useMarketData({
     network,
     pairKind,
@@ -89,25 +112,81 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     setIsChatLoading(true);
 
     try {
+      if (pendingChatTrade && isTradeConfirmationMessage(content)) {
+        logInfo(
+          'chat-trade',
+          'Submitting staged order',
+          `${pendingChatTrade.side} ${pendingChatTrade.size} ${pendingChatTrade.pair} ${pendingChatTrade.type}`,
+        );
+        const result = await placeOrderTool({
+          network: network.id,
+          pair: pendingChatTrade.pair,
+          side: pendingChatTrade.side,
+          type: pendingChatTrade.type,
+          size: pendingChatTrade.size,
+          price: pendingChatTrade.price,
+          confirm: true,
+        });
+        setPendingChatTrade(undefined);
+        setChatMessages((messages) =>
+          appendChatMessage(messages, 'assistant', result.summary),
+        );
+        logInfo('chat-trade', 'Order submitted', result.summary);
+        return;
+      }
+
+      const tradeIntent = parseChatTradeIntent({
+        message: content,
+        activePair: activePair.label,
+      });
+      if (tradeIntent) {
+        setPendingChatTrade(tradeIntent);
+        logInfo(
+          'chat-trade',
+          'Staged order from chat',
+          `${tradeIntent.side} ${tradeIntent.size} ${tradeIntent.pair} ${tradeIntent.type}`,
+        );
+        setChatMessages((messages) =>
+          appendChatMessage(
+            messages,
+            'assistant',
+            buildTradeIntentConfirmationMessage({
+              intent: tradeIntent,
+              networkLabel: network.label,
+              priceLabel,
+            }),
+          ),
+        );
+        return;
+      }
+
       const reply = await requestAgentChat({
         messages: nextMessages,
         context: {
           pairLabel: activePair.label,
           priceLabel,
           resolutionLabel,
+          walletUnlocked: true,
         },
       });
       setChatMessages((messages) =>
         appendChatMessage(messages, 'assistant', reply),
       );
     } catch (error) {
+      if (pendingChatTrade) {
+        logOrderError(error);
+      }
+
       setChatMessages((messages) =>
         appendChatMessage(
           messages,
           'assistant',
-          `Agent error: ${(error as Error).message}`,
+          pendingChatTrade
+            ? `Order failed: ${formatErrorMessage(error)}`
+            : `Agent error: ${formatErrorMessage(error)}`,
         ),
       );
+      setPendingChatTrade(undefined);
     } finally {
       setIsChatLoading(false);
     }
@@ -115,10 +194,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
 
   useInput((input, key) => {
     if (key.tab) {
-      const currentIndex = focusOrder.indexOf(focusTarget);
-      setFocusTarget(
-        focusOrder[(currentIndex + 1) % focusOrder.length] ?? 'pairs',
-      );
+      setFocusTarget((current) => cycleFocusTarget(current, mode === 'debug'));
       return;
     }
 
@@ -140,6 +216,23 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
 
       if (!key.ctrl && !key.meta && input.length > 0) {
         setChatInput((value) => `${value}${input}`);
+        return;
+      }
+    }
+
+    if (focusTarget === 'debug' && mode === 'debug') {
+      if (key.backspace || key.delete) {
+        setDebugFilter((value) => value.slice(0, -1));
+        return;
+      }
+
+      if (key.escape) {
+        setDebugFilter('');
+        return;
+      }
+
+      if (!key.ctrl && !key.meta && !key.return && input.length > 0) {
+        setDebugFilter((value) => `${value}${input}`);
         return;
       }
     }
@@ -183,7 +276,12 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
 
   const frameWidth = Math.max(process.stdout.columns ?? 120, 100);
   const frameHeight = Math.max((process.stdout.rows ?? 30) - 1, 28);
-  const middleRowHeight = Math.max(frameHeight - 7, 10);
+  const contentHeight = Math.max(frameHeight - FRAME_PADDING_Y * 2, 20);
+  const debugPanelHeight = mode === 'debug' ? 8 : 0;
+  const middleRowHeight = Math.max(
+    contentHeight - TOP_BAR_HEIGHT - FOOTER_HEIGHT - debugPanelHeight,
+    10,
+  );
   const orderBookHeight = Math.max(Math.floor(middleRowHeight / 3), 8);
   const tradeListHeight = Math.max(
     middleRowHeight - orderBookHeight - PANEL_GAP,
@@ -211,7 +309,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       width={frameWidth}
       height={frameHeight}
       paddingX={1}
-      paddingY={1}
+      paddingY={FRAME_PADDING_Y}
     >
       <TopBar
         activePair={activePair.label}
@@ -241,6 +339,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
             height={chartHeight}
             lastPriceLabel={priceLabel}
             pairLabel={activePair.label}
+            resolution={resolution}
             resolutionLabel={resolutions
               .map(
                 (item) =>
@@ -286,7 +385,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
             </Panel>
             <Panel
               title="Trades"
-              borderColor="gray"
+              borderColor={focusTarget === 'trades' ? 'yellow' : 'gray'}
               marginTop={PANEL_GAP}
               height={tradeListHeight}
             >
@@ -308,7 +407,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
             </Panel>
           </Box>
           <Panel
-            title="AI Chat"
+            title="AGENT"
             borderColor={focusTarget === 'chat' ? 'yellow' : 'gray'}
             width="58%"
             height={middleRowHeight}
@@ -338,6 +437,23 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
           </Panel>
         </Box>
       </Box>
+      {mode === 'debug' ? (
+        <Box height={debugPanelHeight} marginTop={PANEL_GAP}>
+          <DebugPanel
+            filterQuery={debugFilter}
+            height={debugPanelHeight}
+            isFocused={focusTarget === 'debug'}
+          />
+        </Box>
+      ) : null}
+      <Panel borderColor="gray" height={FOOTER_HEIGHT}>
+        <Box justifyContent="space-between">
+          <Text color={getWebSocketDelayTone(websocketDelayMs)}>
+            {`WS delay ${formatWebSocketDelay(websocketDelayMs)}`}
+          </Text>
+          <Text color="gray">{`DEEPX v${CLI_VERSION}  ${mode}`}</Text>
+        </Box>
+      </Panel>
     </Box>
   );
 };
@@ -373,7 +489,7 @@ const TopBar: FC<TopBarProps> = ({
     <Panel
       title="Markets"
       borderColor={focusTarget === 'pairs' ? 'yellow' : 'gray'}
-      height={6}
+      height={TOP_BAR_HEIGHT}
     >
       <Box justifyContent="space-between">
         <Box>
@@ -424,7 +540,7 @@ const TopBar: FC<TopBarProps> = ({
 };
 
 type PanelProps = {
-  title: string;
+  title?: string;
   borderColor: 'yellow' | 'gray';
   children: ReactNode;
   height?: number;
@@ -455,7 +571,11 @@ const Panel: FC<PanelProps> = ({
       marginRight={marginRight}
       flexGrow={width ? 0 : 1}
     >
-      <Text color={borderColor === 'yellow' ? 'yellow' : 'gray'}>{title}</Text>
+      {title ? (
+        <Text color={borderColor === 'yellow' ? 'yellow' : 'gray'}>
+          {title}
+        </Text>
+      ) : null}
       {children}
     </Box>
   );
@@ -637,6 +757,11 @@ function formatResolution(value: string): string {
     default:
       return value;
   }
+}
+
+function logOrderError(error: unknown) {
+  logError('chat-trade', 'Order failure', formatErrorMessage(error));
+  process.stderr.write(`[deepx order error] ${formatErrorWithStack(error)}\n`);
 }
 
 function getStableKeys(values: string[]): { key: string; value: string }[] {

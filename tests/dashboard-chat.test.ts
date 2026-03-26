@@ -11,13 +11,17 @@ import {
 
 describe('dashboard chat', () => {
   test('builds a system prompt with market context', () => {
-    expect(
-      buildChatSystemPrompt({
-        pairLabel: 'BTC-USDC',
-        priceLabel: '68250.40',
-        resolutionLabel: '15m',
-      }),
-    ).toContain('BTC-USDC');
+    const prompt = buildChatSystemPrompt({
+      pairLabel: 'BTC-USDC',
+      priceLabel: '68250.40',
+      resolutionLabel: '15m',
+      walletUnlocked: true,
+    });
+
+    expect(prompt).toContain('BTC-USDC');
+    expect(prompt).toContain('already unlocked');
+    expect(prompt).toContain('status=submitted');
+    expect(prompt).toContain('Do not ask for the passphrase again');
   });
 
   test('maps chat history into GenAI contents', () => {

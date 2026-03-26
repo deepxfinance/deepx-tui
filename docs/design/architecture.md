@@ -30,10 +30,19 @@
 
 - the AI chat panel uses an in-process DeepX agent backed by the Google GenAI SDK
 - the agent exposes the existing DeepX order and market helpers as direct function tools instead of routing through MCP
-- the chat tool layer is advisory-only and intentionally blocks live order submission and cancellation until a dedicated confirmation workflow exists
-- live perp `place` and `cancel` flows remain ported from `deepdex-web`, using the same contract call and `/v2/chain/tx/transact` relay pattern
+- the chat tool layer can submit live perp orders through `deepx_place_order` when the model sets `confirm=true` and a wallet passphrase is available, either explicitly or from the active unlocked session
+- AI-driven order cancellation remains blocked until a dedicated confirmation workflow exists
+- simple imperative trade messages such as `buy 0.001 ETH` are parsed locally in the dashboard and converted into a staged order flow before confirmation, instead of routing those trivial intents through the LLM
+- live perp `place` and `cancel` flows sign locally, then broadcast the raw transaction directly through the selected network RPC
 - live execution requires the local encrypted wallet plus an explicit passphrase and confirmation flag at tool-call time
 - spot order execution remains out of scope until token approval and balance flows are ported
+
+## Observability
+
+- a shared in-process logger records structured application events
+- default mode captures warnings and errors only to avoid continuous runtime overhead
+- `--mode debug` enables low-level HTTP, RPC, and websocket request/response logging plus an in-dashboard debug panel
+- sensitive payload fields such as `signedTx`, `passphrase`, and `privateKey` are redacted before they enter the logger
 
 ## Phase 1 Runtime Flow
 

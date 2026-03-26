@@ -4,10 +4,38 @@ import { buildChartModel } from '../src/components/chart/chart-render';
 import { createPriceScale } from '../src/components/chart/chart-scale';
 
 const candles = [
-  { time: 1, open: 100, high: 110, low: 95, close: 105, volume: 10 },
-  { time: 2, open: 105, high: 112, low: 101, close: 109, volume: 12 },
-  { time: 3, open: 109, high: 118, low: 107, close: 111, volume: 14 },
-  { time: 4, open: 111, high: 116, low: 104, close: 106, volume: 18 },
+  {
+    time: Date.UTC(2026, 2, 26, 0, 0),
+    open: 100,
+    high: 110,
+    low: 95,
+    close: 105,
+    volume: 10,
+  },
+  {
+    time: Date.UTC(2026, 2, 26, 0, 1),
+    open: 105,
+    high: 112,
+    low: 101,
+    close: 109,
+    volume: 12,
+  },
+  {
+    time: Date.UTC(2026, 2, 26, 0, 2),
+    open: 109,
+    high: 118,
+    low: 107,
+    close: 111,
+    volume: 14,
+  },
+  {
+    time: Date.UTC(2026, 2, 26, 0, 3),
+    open: 111,
+    high: 116,
+    low: 104,
+    close: 106,
+    volume: 18,
+  },
 ];
 
 describe('chart scale', () => {
@@ -19,18 +47,52 @@ describe('chart scale', () => {
 
 describe('chart render', () => {
   test('builds rows and a time axis', () => {
-    const model = buildChartModel(candles, { width: 4, height: 8 });
+    const model = buildChartModel(candles, {
+      width: 12,
+      height: 8,
+      resolution: '1',
+    });
+    const timeAxisText = model.timeAxis.segments
+      .map((segment) => segment.text)
+      .join('');
+
     expect(model.rows).toHaveLength(4);
     expect(model.volumeRows).toHaveLength(4);
-    expect(model.timeAxis.segments[0]?.text.includes('00:')).toBeTrue();
+    expect(timeAxisText.includes('00:00')).toBeTrue();
+    expect(timeAxisText.trim().length).toBeGreaterThan(0);
   });
 
   test('renders a current price marker', () => {
-    const model = buildChartModel(candles, { width: 4, height: 8 });
+    const model = buildChartModel(candles, {
+      width: 12,
+      height: 8,
+      resolution: '1',
+    });
     expect(
       model.rows.some((row) =>
         row.segments.some((segment) => segment.text.includes('●')),
       ),
     ).toBeTrue();
   });
+
+  test('adds spacing between candles and volume bars when width allows it', () => {
+    const model = buildChartModel(candles, {
+      width: 12,
+      height: 8,
+      resolution: '1',
+    });
+    const chartRow = model.rows
+      .map(renderRowText)
+      .find((row) => row.includes('█ █'));
+    const volumeRow = model.volumeRows
+      .map(renderRowText)
+      .find((row) => row.includes('▇ ▇'));
+
+    expect(Boolean(chartRow)).toBeTrue();
+    expect(volumeRow?.includes('▇ ▇')).toBeTrue();
+  });
 });
+
+function renderRowText(row: { segments: Array<{ text: string }> }): string {
+  return row.segments.map((segment) => segment.text).join('');
+}

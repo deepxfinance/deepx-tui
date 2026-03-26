@@ -37,7 +37,7 @@ export const DEEPX_AGENT_TOOL_DECLARATIONS = [
   {
     name: 'deepx_place_order',
     description:
-      'Place a DeepX order. Perp orders become live when confirm=true and a wallet passphrase is available. All other markets stay dry-run.',
+      'Place a DeepX order. Perp orders become live when confirm=true and the wallet is already unlocked in this session or a passphrase is provided. Passphrase is optional for an unlocked session wallet. All other markets stay dry-run.',
     parametersJsonSchema: {
       type: 'object',
       additionalProperties: false,

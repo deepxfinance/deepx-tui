@@ -21,4 +21,11 @@ describe('parseCliArgs', () => {
       parseCliArgs(['--network', 'devnet', 'markets', '--foo']).passthroughArgs,
     ).toEqual(['markets', '--foo']);
   });
+
+  test('parses debug mode and strips it from passthrough args', () => {
+    const parsed = parseCliArgs(['--mode', 'debug', 'markets']);
+
+    expect(parsed.mode).toBe('debug');
+    expect(parsed.passthroughArgs).toEqual(['markets']);
+  });
 });

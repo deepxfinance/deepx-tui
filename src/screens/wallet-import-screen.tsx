@@ -3,7 +3,7 @@ import type { FC } from 'react';
 import { useState } from 'react';
 
 import type { NetworkConfig } from '../config/networks';
-import { maskValue } from '../lib/format';
+import { formatFocusedInputValue, maskValue } from '../lib/format';
 import { normalizePrivateKeyInput } from '../services/wallet-store';
 
 type WalletImportScreenProps = {
@@ -165,7 +165,7 @@ const InlineFieldRow: FC<FieldRowProps> = ({ label, value, isFocused }) => {
   return (
     <Box marginBottom={1}>
       <Text color={isFocused ? 'yellow' : 'gray'}>{label}: </Text>
-      <Text>{value}</Text>
+      <Text>{formatFocusedInputValue(value, isFocused)}</Text>
     </Box>
   );
 };

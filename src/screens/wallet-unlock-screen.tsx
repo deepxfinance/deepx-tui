@@ -3,7 +3,11 @@ import type { FC } from 'react';
 import { useState } from 'react';
 
 import type { NetworkConfig } from '../config/networks';
-import { maskValue, truncateMiddle } from '../lib/format';
+import {
+  formatFocusedInputValue,
+  maskValue,
+  truncateMiddle,
+} from '../lib/format';
 
 type WalletUnlockScreenProps = {
   network: NetworkConfig;
@@ -86,7 +90,12 @@ export const WalletUnlockScreen: FC<WalletUnlockScreenProps> = ({
         <Text> </Text>
         <Box>
           <Text color="yellow">Passphrase: </Text>
-          <Text>{maskValue(passphrase, isSecretVisible)}</Text>
+          <Text>
+            {formatFocusedInputValue(
+              maskValue(passphrase, isSecretVisible),
+              true,
+            )}
+          </Text>
         </Box>
         <Text> </Text>
         {effectiveError ? (

@@ -8,6 +8,7 @@ type ChatPromptContext = {
   pairLabel: string;
   priceLabel: string;
   resolutionLabel: string;
+  walletUnlocked: boolean;
 };
 
 const MAX_CHAT_MESSAGES = 12;
@@ -22,7 +23,7 @@ export function createInitialChatMessages(): ChatMessage[] {
     ),
     createChatMessage(
       'assistant',
-      'Set GEMINI_API_KEY or GOOGLE_API_KEY to enable live replies from gemini-3-flash-previous.',
+      'Set GEMINI_API_KEY or GOOGLE_API_KEY to enable live replies from gemini-3-flash-preview.',
       [{ id: 'assistant-1', role: 'assistant', content: '' }],
     ),
   ];
@@ -56,9 +57,12 @@ export function buildChatSystemPrompt(context: ChatPromptContext): string {
     'Respond in plain text only.',
     'Keep answers concise and terminal-friendly.',
     'Use the available DeepX tools when they improve accuracy for markets or orders.',
-    'AI chat is advisory-only for trading actions.',
-    'Never claim to execute trades or place live orders.',
-    'Use order tools for analysis and dry-run planning only.',
+    'Use deepx_place_order for live perp order placement only when the user explicitly wants execution.',
+    context.walletUnlocked
+      ? 'The wallet for this session is already unlocked. Do not ask for the passphrase again and omit passphrase from order tool calls unless the user explicitly wants to override it.'
+      : 'A live perp order requires confirm=true and either a wallet passphrase or an already unlocked session wallet.',
+    'Only say an order was submitted after the tool returns status=submitted.',
+    'If those execution requirements are missing, explain the constraint instead of implying execution happened.',
     `Active pair: ${context.pairLabel}.`,
     `Displayed price: ${context.priceLabel}.`,
     `Chart resolution: ${context.resolutionLabel}.`,

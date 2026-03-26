@@ -1,3 +1,4 @@
+import { formatChartTimestamp } from '../../lib/time';
 import { createPriceScale } from './chart-scale';
 import { chartTheme } from './chart-theme';
 import type {
@@ -10,6 +11,7 @@ import type {
 type RenderOptions = {
   width: number;
   height: number;
+  resolution?: string;
   priceAxisWidth?: number;
   volumeHeight?: number;
 };
@@ -24,7 +26,9 @@ export function buildChartModel(
   candles: ChartCandle[],
   options: RenderOptions,
 ): ChartModel {
-  const visibleCandles = candles.slice(-Math.max(options.width, 1));
+  const plotMetrics = resolvePlotMetrics(options.width);
+  const plotColumns = new Set(plotMetrics.columns);
+  const visibleCandles = candles.slice(-plotMetrics.visibleCapacity);
   const volumeHeight = options.volumeHeight ?? 4;
   const candleHeight = Math.max(options.height - volumeHeight, 4);
   const scale = createPriceScale(visibleCandles, candleHeight);
@@ -41,14 +45,20 @@ export function buildChartModel(
     Array.from(
       { length: options.width },
       (_, _x): Cell => ({
-        char: gridRows.has(y) ? '┈' : ' ',
-        color: gridRows.has(y) ? chartTheme.grid : undefined,
-        priority: gridRows.has(y) ? 0 : -1,
+        char: gridRows.has(y) && plotColumns.has(_x) ? '┈' : ' ',
+        color:
+          gridRows.has(y) && plotColumns.has(_x) ? chartTheme.grid : undefined,
+        priority: gridRows.has(y) && plotColumns.has(_x) ? 0 : -1,
       }),
     ),
   );
 
-  for (const [x, candle] of visibleCandles.entries()) {
+  for (const [index, candle] of visibleCandles.entries()) {
+    const x = plotMetrics.columns[index];
+    if (x == null) {
+      continue;
+    }
+
     const wickColor =
       candle.close >= candle.open ? chartTheme.up : chartTheme.down;
     const highRow = scale.rowForPrice(candle.high);
@@ -74,14 +84,15 @@ export function buildChartModel(
     }
   }
 
-  for (let x = 0; x < options.width; x += 1) {
+  const lastColumn = plotMetrics.columns[plotMetrics.columns.length - 1];
+  for (const x of plotMetrics.columns) {
     paintCell(
       matrix,
       x,
       lastPriceRow,
-      x === options.width - 1 ? '●' : '─',
+      x === lastColumn ? '●' : '─',
       chartTheme.priceLine,
-      x === options.width - 1 ? 5 : 1,
+      x === lastColumn ? 5 : 1,
     );
   }
 
@@ -109,8 +120,14 @@ export function buildChartModel(
       options.width,
       volumeHeight,
       priceAxisWidth,
+      plotMetrics.columns,
     ),
-    timeAxis: buildTimeAxis(visibleCandles, options.width, priceAxisWidth),
+    timeAxis: buildTimeAxis(
+      visibleCandles,
+      options.width,
+      priceAxisWidth,
+      options.resolution ?? '15',
+    ),
     minPrice: scale.min,
     maxPrice: scale.max,
     lastPrice,
@@ -122,6 +139,7 @@ function buildVolumeRows(
   width: number,
   height: number,
   priceAxisWidth: number,
+  columns: number[],
 ): ChartRow[] {
   if (candles.length === 0) {
     return Array.from({ length: height }, (_, rowIndex) => ({
@@ -150,7 +168,12 @@ function buildVolumeRows(
     ),
   );
 
-  for (const [x, candle] of candles.entries()) {
+  for (const [index, candle] of candles.entries()) {
+    const x = columns[index];
+    if (x == null) {
+      continue;
+    }
+
     const barHeight = Math.max(
       1,
       Math.round((candle.volume / maxVolume) * height),
@@ -179,23 +202,22 @@ function buildTimeAxis(
   candles: ChartCandle[],
   width: number,
   priceAxisWidth: number,
+  resolution: string,
 ): ChartRow {
   const axis = Array.from({ length: width }, () => ' ');
-  const checkpoints = [0, Math.floor((width - 1) / 2), Math.max(width - 6, 0)];
-  const labels = [
-    formatTime(candles[0]?.time),
-    formatTime(candles[Math.floor((candles.length - 1) / 2)]?.time),
-    formatTime(candles[candles.length - 1]?.time),
-  ];
+  const checkpoints = resolveTimeAxisCheckpoints(candles, width, resolution);
 
-  for (const [index, start] of checkpoints.entries()) {
-    const label = labels[index] ?? '--:--';
-    for (const [offset, char] of [...label].entries()) {
-      const x = start + offset;
-      if (x < width) {
-        axis[x] = char;
-      }
-    }
+  for (const [checkpointIndex, checkpoint] of checkpoints.entries()) {
+    placeAxisLabel(
+      axis,
+      checkpoint.label,
+      resolveAxisLabelStart(
+        width,
+        checkpoint.label.length,
+        checkpointIndex,
+        checkpoints.length,
+      ),
+    );
   }
 
   return {
@@ -212,6 +234,86 @@ function buildTimeAxis(
       },
     ],
   };
+}
+
+function resolvePlotMetrics(width: number): {
+  columns: number[];
+  visibleCapacity: number;
+} {
+  const gap = width >= 8 ? 1 : 0;
+  const step = gap + 1;
+  const visibleCapacity = Math.max(Math.floor((width + gap) / step), 1);
+  const columns = Array.from(
+    { length: visibleCapacity },
+    (_, index) => index * step,
+  ).filter((column) => column < width);
+
+  return {
+    columns,
+    visibleCapacity: columns.length,
+  };
+}
+
+function resolveTimeAxisCheckpoints(
+  candles: ChartCandle[],
+  width: number,
+  resolution: string,
+): Array<{ index: number; label: string }> {
+  if (candles.length === 0) {
+    return [{ index: 0, label: formatChartTimestamp(undefined, resolution) }];
+  }
+
+  const targetCount = Math.max(
+    3,
+    Math.min(candles.length, Math.floor(width / 6)),
+  );
+  const checkpoints: Array<{ index: number; label: string }> = [];
+  const usedIndexes = new Set<number>();
+
+  for (let position = 0; position < targetCount; position += 1) {
+    const index =
+      targetCount === 1
+        ? candles.length - 1
+        : Math.round((position * (candles.length - 1)) / (targetCount - 1));
+    if (usedIndexes.has(index)) {
+      continue;
+    }
+
+    usedIndexes.add(index);
+    checkpoints.push({
+      index,
+      label: formatChartTimestamp(candles[index]?.time, resolution),
+    });
+  }
+
+  return checkpoints;
+}
+
+function resolveAxisLabelStart(
+  width: number,
+  labelLength: number,
+  index: number,
+  count: number,
+): number {
+  const maxStart = Math.max(width - labelLength, 0);
+  if (count <= 1) {
+    return 0;
+  }
+
+  return Math.round((index * maxStart) / (count - 1));
+}
+
+function placeAxisLabel(axis: string[], label: string, start: number) {
+  const end = start + label.length;
+
+  if (axis.slice(start, end).some((char) => char !== ' ')) {
+    return;
+  }
+
+  for (const [offset, char] of [...label].entries()) {
+    const index = start + offset;
+    axis[index] = char;
+  }
 }
 
 function compressCells(cells: Cell[], prefix: string): ChartSegment[] {
@@ -283,15 +385,4 @@ function formatCompact(value: number): string {
   }
 
   return value.toFixed(0);
-}
-
-function formatTime(value?: number): string {
-  if (!value) {
-    return '--:--';
-  }
-
-  const date = new Date(value);
-  return `${String(date.getHours()).padStart(2, '0')}:${String(
-    date.getMinutes(),
-  ).padStart(2, '0')}`;
 }

@@ -1,4 +1,6 @@
 import type { NetworkConfig } from '../config/networks';
+import { normalizeUnixTimestamp } from '../lib/time';
+import { logError, logNetworkRequest, logNetworkResponse } from './logger';
 import type { MarketPair } from './market-catalog';
 
 export type CandleBar = {
@@ -64,7 +66,7 @@ export async function fetchCandles(input: {
   );
   const details = response.data.details ?? [];
   const bars = details.map((bar) => ({
-    time: Number(bar.time),
+    time: normalizeUnixTimestamp(Number(bar.time)),
     open: Number(bar.open),
     high: Number(bar.high),
     low: Number(bar.low),
@@ -80,18 +82,36 @@ export async function fetchJson<T>(
   path: string,
 ): Promise<T> {
   const url = new URL(path, network.apiBaseUrl);
+  logNetworkRequest({
+    scope: 'market-http',
+    method: 'GET',
+    url: url.toString(),
+  });
   const response = await fetch(url, {
     headers: {
       'content-type': 'application/json',
       'accept-language': 'en-US',
     },
   });
+  const responseBody = await response.text();
+  logNetworkResponse({
+    scope: 'market-http',
+    method: 'GET',
+    url: url.toString(),
+    status: response.status,
+    body: responseBody,
+  });
 
   if (!response.ok) {
+    logError(
+      'market-http',
+      'Request failed',
+      `${url} status=${response.status}`,
+    );
     throw new Error(`Request failed with status ${response.status}`);
   }
 
-  return (await response.json()) as T;
+  return JSON.parse(responseBody) as T;
 }
 
 export function resolutionToTimeFrame(resolution: string): string {

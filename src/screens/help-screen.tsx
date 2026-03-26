@@ -23,10 +23,13 @@ export const HelpScreen: FC<HelpScreenProps> = ({ commandName }) => {
       width={76}
     >
       <Text color="yellow">DeepX Terminal</Text>
-      <Text>Usage: {commandName} [--network devnet|testnet]</Text>
+      <Text>
+        Usage: {commandName} [--network devnet|testnet] [--mode default|debug]
+      </Text>
       <Text> </Text>
       <Text>Phase 1 behavior:</Text>
       <Text>- defaults to devnet</Text>
+      <Text>- optional debug mode shows a live internal log panel</Text>
       <Text>- checks for a local encrypted wallet</Text>
       <Text>- prompts for passphrase if a wallet already exists</Text>
       <Text>- prompts for a simple private key import if missing</Text>

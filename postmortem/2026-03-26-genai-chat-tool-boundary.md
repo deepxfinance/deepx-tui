@@ -2,6 +2,8 @@
 
 Date: 2026-03-26
 
+Superseded by later follow-up work that re-enabled explicitly confirmed live perp placement from chat and added deterministic local order staging plus debug observability. This write-up remains accurate for the intermediate hardening step only.
+
 ## What Happened
 
 The first pass of the GenAI chat refactor moved tool calls in-process, but the chat layer still inherited enough authority to reach live order paths when a wallet was already unlocked.

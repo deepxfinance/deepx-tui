@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 
 import { getNetworkConfig } from '../src/config/networks';
 import {
+  formatRpcFailureMessage,
+  getTransactionSubmissionRpcUrl,
   listLivePerpPairs,
   placePerpOrderLive,
 } from '../src/services/perp-trading';
@@ -30,5 +32,17 @@ describe('perp trading config', () => {
         confirm: false,
       }),
     ).rejects.toThrow('Live order submission requires confirm=true.');
+  });
+
+  test('uses the network rpc url for transaction submission', () => {
+    expect(
+      getTransactionSubmissionRpcUrl(getNetworkConfig('deepx_devnet')),
+    ).toBe('https://devnet-rpc.deepx.fi');
+  });
+
+  test('includes the rpc error message in failure messages', () => {
+    expect(formatRpcFailureMessage(new Error('backend exploded'))).toBe(
+      'RPC transaction submission failed: backend exploded',
+    );
   });
 });

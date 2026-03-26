@@ -8,10 +8,11 @@ const cli = parseCliArgs(process.argv.slice(2));
 
 if (cli.showHelp && !process.stdin.isTTY) {
   process.stdout.write(`DeepX Terminal
-Usage: deepx [--network devnet|testnet]
+Usage: deepx [--network devnet|testnet] [--mode default|debug]
 
 Phase 1 behavior:
 - defaults to devnet
+- defaults to mode=default
 - checks for a local encrypted wallet
 - prompts for passphrase if a wallet already exists
 - prompts for private key import if missing

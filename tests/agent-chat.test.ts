@@ -26,6 +26,7 @@ describe('agent chat service', () => {
         pairLabel: 'BTC-USDC',
         priceLabel: '68250.40',
         resolutionLabel: '15m',
+        walletUnlocked: true,
       },
       client,
     });
@@ -73,6 +74,7 @@ describe('agent chat service', () => {
         pairLabel: 'BTC-USDC',
         priceLabel: '68250.40',
         resolutionLabel: '15m',
+        walletUnlocked: true,
       },
       client,
     });
@@ -108,6 +110,79 @@ describe('agent chat service', () => {
               },
             },
           },
+        },
+      ],
+    });
+  });
+
+  test('preserves thought signatures on model tool-call parts', async () => {
+    const calls: GenerateContentParameters[] = [];
+    const client: GenAiClientLike = {
+      models: {
+        async generateContent(input) {
+          calls.push(input);
+
+          if (calls.length === 1) {
+            return {
+              candidates: [
+                {
+                  content: {
+                    role: 'model',
+                    parts: [
+                      {
+                        functionCall: {
+                          id: 'call-3',
+                          name: 'deepx_list_open_orders',
+                          args: { network: 'deepx_devnet' },
+                        },
+                        thoughtSignature: 'sig-123',
+                      },
+                    ],
+                  },
+                },
+              ],
+              functionCalls: [
+                {
+                  id: 'call-3',
+                  name: 'deepx_list_open_orders',
+                  args: { network: 'deepx_devnet' },
+                },
+              ],
+            };
+          }
+
+          return {
+            text: 'Handled with preserved signature.',
+          };
+        },
+      },
+    };
+
+    const result = await requestAgentChat({
+      messages: [
+        { id: 'user-1', role: 'user', content: 'Check open orders again.' },
+      ],
+      context: {
+        pairLabel: 'BTC-USDC',
+        priceLabel: '68250.40',
+        resolutionLabel: '15m',
+        walletUnlocked: true,
+      },
+      client,
+    });
+
+    expect(result).toBe('Handled with preserved signature.');
+    const secondCallContents = calls[1]?.contents as Content[];
+    expect(secondCallContents.at(-2)).toEqual({
+      role: 'model',
+      parts: [
+        {
+          functionCall: {
+            id: 'call-3',
+            name: 'deepx_list_open_orders',
+            args: { network: 'deepx_devnet' },
+          },
+          thoughtSignature: 'sig-123',
         },
       ],
     });
@@ -152,6 +227,7 @@ describe('agent chat service', () => {
         pairLabel: 'BTC-USDC',
         priceLabel: '68250.40',
         resolutionLabel: '15m',
+        walletUnlocked: true,
       },
       client,
     });
@@ -178,6 +254,74 @@ describe('agent chat service', () => {
     });
   });
 
+  test('allows AI place-order tool calls to reach live execution guards', async () => {
+    const calls: GenerateContentParameters[] = [];
+    const client: GenAiClientLike = {
+      models: {
+        async generateContent(input) {
+          calls.push(input);
+
+          if (calls.length === 1) {
+            return {
+              functionCalls: [
+                {
+                  id: 'call-4',
+                  name: 'deepx_place_order',
+                  args: {
+                    network: 'deepx_devnet',
+                    pair: 'ETH-USDC',
+                    side: 'BUY',
+                    type: 'LIMIT',
+                    size: '1',
+                    price: '1000',
+                    passphrase: 'session-secret',
+                    confirm: false,
+                  },
+                },
+              ],
+            };
+          }
+
+          return {
+            text: 'Live placement needs confirm=true before submission.',
+          };
+        },
+      },
+    };
+
+    const result = await requestAgentChat({
+      messages: [
+        { id: 'user-1', role: 'user', content: 'Submit that order now.' },
+      ],
+      context: {
+        pairLabel: 'ETH-USDC',
+        priceLabel: '1000.00',
+        resolutionLabel: '15m',
+        walletUnlocked: true,
+      },
+      client,
+    });
+
+    expect(result).toBe('Live placement needs confirm=true before submission.');
+    const secondCallContents = calls[1]?.contents as Content[];
+    expect(secondCallContents.at(-1)).toEqual({
+      role: 'user',
+      parts: [
+        {
+          functionResponse: {
+            id: 'call-4',
+            name: 'deepx_place_order',
+            response: {
+              error: {
+                message: 'Live order submission requires confirm=true.',
+              },
+            },
+          },
+        },
+      ],
+    });
+  });
+
   test('rejects requests without a user prompt', async () => {
     await expect(
       requestAgentChat({
@@ -186,6 +330,7 @@ describe('agent chat service', () => {
           pairLabel: 'BTC-USDC',
           priceLabel: '68250.40',
           resolutionLabel: '15m',
+          walletUnlocked: true,
         },
       }),
     ).rejects.toThrowError('No user prompt available for the DeepX agent.');

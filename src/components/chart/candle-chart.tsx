@@ -10,6 +10,7 @@ type CandleChartProps = {
   width: number;
   height: number;
   pairLabel: string;
+  resolution: string;
   resolutionLabel: string;
   lastPriceLabel: string;
   changeLabel: string;
@@ -22,6 +23,7 @@ export const CandleChart: FC<CandleChartProps> = ({
   width,
   height,
   pairLabel,
+  resolution,
   resolutionLabel,
   lastPriceLabel,
   changeLabel,
@@ -29,8 +31,8 @@ export const CandleChart: FC<CandleChartProps> = ({
   streamStatus,
 }) => {
   const model = useMemo(
-    () => buildChartModel(candles, { width, height }),
-    [candles, height, width],
+    () => buildChartModel(candles, { width, height, resolution }),
+    [candles, height, resolution, width],
   );
 
   return (

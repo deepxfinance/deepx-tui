@@ -2,10 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 
 import type { NetworkConfig } from '../config/networks';
 import {
+  alignTimestampToResolution,
+  normalizeUnixTimestamp,
+} from '../lib/time';
+import {
   type CandleBar,
   fetchCandles,
   resolutionToTimeFrame,
 } from './deepx-api';
+import { logError, logSocketEvent } from './logger';
 import {
   getMarketPairs,
   getPairsByKind,
@@ -59,6 +64,7 @@ type UseMarketDataState = {
   candleStreamStatus: 'live' | 'reconnecting' | 'stale';
   candleError?: string;
   orderbookError?: string;
+  websocketDelayMs?: number;
 };
 
 export function useMarketData(input: {
@@ -91,39 +97,81 @@ export function useMarketData(input: {
   );
   const [candleError, setCandleError] = useState<string>();
   const [orderbookError, setOrderbookError] = useState<string>();
+  const [overviewWebSocketDelayMs, setOverviewWebSocketDelayMs] = useState<
+    number | undefined
+  >();
+  const [orderbookWebSocketDelayMs, setOrderbookWebSocketDelayMs] = useState<
+    number | undefined
+  >();
 
   useEffect(() => {
     const websocket = new WebSocket(input.network.marketWsUrl);
+    let pendingPingAt: number | null = null;
     const subscribedPairs = allPairs.map((pair) => ({
       type: pair.kind,
       name: pair.label,
     }));
+    const sendPing = () => {
+      if (websocket.readyState !== websocket.OPEN) {
+        return;
+      }
+
+      pendingPingAt = Date.now();
+      const payload = JSON.stringify({ action: 'ping' });
+      logSocketEvent({
+        scope: 'overview-ws',
+        url: input.network.marketWsUrl,
+        event: 'send',
+        payload,
+      });
+      websocket.send(payload);
+    };
 
     websocket.addEventListener('open', () => {
       setIsOverviewConnected(true);
-      websocket.send(
-        JSON.stringify({
-          action: 'multi_subscribe',
-          markets: subscribedPairs,
-          subscriptions: [
-            'latest_price',
-            'price_change_1h',
-            'price_change_24h',
-            'funding_rate',
-            'open_interest',
-            'volume_stats',
-          ],
-        }),
-      );
+      const payload = JSON.stringify({
+        action: 'multi_subscribe',
+        markets: subscribedPairs,
+        subscriptions: [
+          'latest_price',
+          'price_change_1h',
+          'price_change_24h',
+          'funding_rate',
+          'open_interest',
+          'volume_stats',
+        ],
+      });
+      logSocketEvent({
+        scope: 'overview-ws',
+        url: input.network.marketWsUrl,
+        event: 'open',
+        payload,
+      });
+      websocket.send(payload);
+      sendPing();
     });
 
     websocket.addEventListener('message', (event) => {
+      logSocketEvent({
+        scope: 'overview-ws',
+        url: input.network.marketWsUrl,
+        event: 'message',
+        payload: String(event.data),
+      });
       const result = JSON.parse(String(event.data)) as {
+        action?: string;
         type?: string;
         market?: { name?: string };
         channel?: string;
+        message?: string;
         data?: unknown;
       };
+
+      if (isWebSocketPongMessage(result) && pendingPingAt != null) {
+        setOverviewWebSocketDelayMs(Date.now() - pendingPingAt);
+        pendingPingAt = null;
+        return;
+      }
 
       const marketName = result.market?.name;
       if (result.type !== 'data' || !marketName) {
@@ -164,18 +212,28 @@ export function useMarketData(input: {
     });
 
     websocket.addEventListener('close', () => {
+      logSocketEvent({
+        scope: 'overview-ws',
+        url: input.network.marketWsUrl,
+        event: 'close',
+      });
       setIsOverviewConnected(false);
+      setOverviewWebSocketDelayMs(undefined);
+      pendingPingAt = null;
     });
 
     websocket.addEventListener('error', () => {
+      logSocketEvent({
+        scope: 'overview-ws',
+        url: input.network.marketWsUrl,
+        event: 'error',
+      });
       setIsOverviewConnected(false);
+      setOverviewWebSocketDelayMs(undefined);
+      pendingPingAt = null;
     });
 
-    const heartbeat = setInterval(() => {
-      if (websocket.readyState === websocket.OPEN) {
-        websocket.send(JSON.stringify({ action: 'ping' }));
-      }
-    }, 30000);
+    const heartbeat = setInterval(sendPing, 15000);
 
     return () => {
       clearInterval(heartbeat);
@@ -200,6 +258,7 @@ export function useMarketData(input: {
         }
       } catch (error) {
         if (!isCancelled) {
+          logError('candles', 'Initial candle load failed', String(error));
           setCandleError((error as Error).message);
         }
       }
@@ -220,36 +279,65 @@ export function useMarketData(input: {
     setLastCandleUpdateAt(null);
 
     const websocket = new WebSocket(input.network.marketWsUrl);
+    let pendingPingAt: number | null = null;
+    const sendPing = () => {
+      if (websocket.readyState !== websocket.OPEN) {
+        return;
+      }
+
+      pendingPingAt = Date.now();
+      const payload = JSON.stringify({ action: 'ping' });
+      logSocketEvent({
+        scope: 'market-ws',
+        url: input.network.marketWsUrl,
+        event: 'send',
+        payload,
+      });
+      websocket.send(payload);
+    };
 
     websocket.addEventListener('open', () => {
       setIsOrderbookConnected(true);
       setIsCandleStreamConnected(true);
-      websocket.send(
-        JSON.stringify({
-          action: 'subscribe',
-          market: {
-            type: activePair.kind,
-            name: activePair.label,
-          },
-          subscriptions: [
-            { time_frame: resolutionToTimeFrame(input.resolution) },
-            'orderbook',
-            'trades',
-            'latest_price',
-            'price_change_24h',
-            'volume_stats',
-          ],
-          options: {
-            compress: false,
-            orderbook_depth: 20,
-            orderbook_price_size: 0.01,
-          },
-        }),
-      );
+      const payload = JSON.stringify({
+        action: 'subscribe',
+        market: {
+          type: activePair.kind,
+          name: activePair.label,
+        },
+        subscriptions: [
+          { time_frame: resolutionToTimeFrame(input.resolution) },
+          'orderbook',
+          'trades',
+          'latest_price',
+          'price_change_24h',
+          'volume_stats',
+        ],
+        options: {
+          compress: false,
+          orderbook_depth: 20,
+          orderbook_price_size: 0.01,
+        },
+      });
+      logSocketEvent({
+        scope: 'market-ws',
+        url: input.network.marketWsUrl,
+        event: 'open',
+        payload,
+      });
+      websocket.send(payload);
+      sendPing();
     });
 
     websocket.addEventListener('message', (event) => {
+      logSocketEvent({
+        scope: 'market-ws',
+        url: input.network.marketWsUrl,
+        event: 'message',
+        payload: String(event.data),
+      });
       const result = JSON.parse(String(event.data)) as {
+        action?: string;
         type?: string;
         channel?: string;
         market?: { name?: string };
@@ -257,6 +345,12 @@ export function useMarketData(input: {
         message?: string;
         data?: unknown;
       };
+
+      if (isWebSocketPongMessage(result) && pendingPingAt != null) {
+        setOrderbookWebSocketDelayMs(Date.now() - pendingPingAt);
+        pendingPingAt = null;
+        return;
+      }
 
       if (result.type === 'error') {
         setOrderbookError(result.message ?? 'Orderbook stream error');
@@ -292,21 +386,31 @@ export function useMarketData(input: {
     });
 
     websocket.addEventListener('close', () => {
+      logSocketEvent({
+        scope: 'market-ws',
+        url: input.network.marketWsUrl,
+        event: 'close',
+      });
       setIsOrderbookConnected(false);
       setIsCandleStreamConnected(false);
+      setOrderbookWebSocketDelayMs(undefined);
+      pendingPingAt = null;
     });
 
     websocket.addEventListener('error', () => {
+      logSocketEvent({
+        scope: 'market-ws',
+        url: input.network.marketWsUrl,
+        event: 'error',
+      });
       setIsOrderbookConnected(false);
       setIsCandleStreamConnected(false);
       setOrderbookError('Orderbook stream unavailable');
+      setOrderbookWebSocketDelayMs(undefined);
+      pendingPingAt = null;
     });
 
-    const heartbeat = setInterval(() => {
-      if (websocket.readyState === websocket.OPEN) {
-        websocket.send(JSON.stringify({ action: 'ping' }));
-      }
-    }, 30000);
+    const heartbeat = setInterval(sendPing, 15000);
 
     return () => {
       clearInterval(heartbeat);
@@ -344,7 +448,20 @@ export function useMarketData(input: {
     ),
     candleError,
     orderbookError,
+    websocketDelayMs:
+      orderbookWebSocketDelayMs ?? overviewWebSocketDelayMs ?? undefined,
   };
+}
+
+export function isWebSocketPongMessage(input: {
+  action?: string;
+  type?: string;
+  channel?: string;
+  message?: string;
+}): boolean {
+  return [input.action, input.type, input.channel, input.message].some(
+    (value) => value?.toLowerCase() === 'pong',
+  );
 }
 
 function getActivePair(
@@ -482,7 +599,7 @@ function toCandleBar(bar: {
   volume: string | number;
 }): CandleBar {
   return {
-    time: Number(bar.time),
+    time: normalizeUnixTimestamp(Number(bar.time)),
     open: Number(bar.open),
     high: Number(bar.high),
     low: Number(bar.low),
@@ -537,37 +654,4 @@ function getCandleStreamStatus(
   }
 
   return 'live';
-}
-
-function alignTimestampToResolution(
-  timestamp: number,
-  resolution: string,
-): number {
-  const interval = resolutionToMilliseconds(resolution);
-  return Math.floor(timestamp / interval) * interval;
-}
-
-function resolutionToMilliseconds(resolution: string): number {
-  switch (resolution) {
-    case '1':
-      return 60_000;
-    case '5':
-      return 5 * 60_000;
-    case '15':
-      return 15 * 60_000;
-    case '30':
-      return 30 * 60_000;
-    case '60':
-      return 60 * 60_000;
-    case '240':
-      return 4 * 60 * 60_000;
-    case '1D':
-      return 24 * 60 * 60_000;
-    case '1W':
-      return 7 * 24 * 60 * 60_000;
-    case '1M':
-      return 30 * 24 * 60 * 60_000;
-    default:
-      return 5 * 60_000;
-  }
 }
