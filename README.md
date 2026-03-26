@@ -1,6 +1,6 @@
 # deepx-tui
 
-`deepx-tui` is the terminal UI companion for [`deepdex-web`](/home/stone/Web/deepdex-web). It includes a fullscreen terminal flow with per-network wallet bootstrap and a live market dashboard.
+`deepx-tui` is a standalone terminal interface for DeepX trading workflows. It is adjacent to [`deepdex-web`](/home/stone/Web/deepdex-web), but built specifically for terminal-first usage with a fullscreen dashboard, per-network wallet bootstrap, and an in-process AI trading assistant.
 
 ## Requirements
 
@@ -8,24 +8,92 @@
 
 ## Install
 
+Global package install:
+
+```bash
+npm install -g deepx-cli
+```
+
+Local development:
+
 ```bash
 bun install
 bun install -g .
 ```
 
+## API Key Setup
+
+Set one of the following environment variables before launching `deepx` if you want live AI chat replies:
+
+```bash
+export GEMINI_API_KEY=your_api_key
+# or
+export GOOGLE_API_KEY=your_api_key
+```
+
 ## Run
+
+Development:
 
 ```bash
 bun run dev
-./bin/deepx --mode debug
+bun run dev -- --network testnet
+bun run dev -- --mode debug
 ```
 
-Or run the command entry directly:
+Installed CLI:
+
+```bash
+deepx
+deepx --network testnet
+deepx --mode debug
+```
+
+Direct entrypoint:
 
 ```bash
 ./bin/deepx
 ./bin/deepx --network testnet
 ```
+
+## Current Design
+
+- `bin/deepx` is the stable user-facing entrypoint
+- the app uses Bun, React, and Ink for a standalone terminal UI
+- startup stays simple: parse CLI flags, resolve network, load wallet metadata, unlock or import wallet, then enter the dashboard
+- wallet storage is local and per-network
+- successful unlock keeps the wallet passphrase in process memory for the active session
+- the dashboard is a fullscreen layout with a market strip, realtime candle chart, orderbook, recent trades, AI chat, and bottom status bar
+- `--mode debug` enables a live debug panel with filtered app, HTTP, RPC, and websocket logs
+- sensitive values such as `privateKey`, `passphrase`, and `signedTx` are redacted before entering logs
+
+## Current Workflow
+
+1. `deepx` starts on `devnet` by default.
+2. Use `--network testnet` to switch to testnet.
+3. The app checks for an encrypted wallet file for the selected network.
+4. If a wallet exists, it prompts for the wallet passphrase before entering the dashboard.
+5. If no wallet exists, it opens a simplified import flow for private key and passphrase.
+6. After unlock or import, it opens the fullscreen dashboard.
+
+## AI Chat And Execution
+
+- the chat panel uses `@google/genai` with `gemini-3-flash-preview`
+- the agent runs in-process and calls built-in DeepX market and order helpers directly
+- simple trade messages such as `buy 0.001 ETH` or `sell 2 SOL at 150` are parsed locally against the active pair and staged for confirmation
+- confirmed perp orders can be submitted as live transactions when the wallet is already unlocked for the session
+- AI-driven order cancellation remains blocked until a dedicated confirmation flow exists
+
+## Dashboard Keys
+
+- `q` quit
+- `tab` cycle focus
+- `1` switch to perp pairs
+- `2` switch to spot pairs
+- left/right or `h`/`l` change pair when the market strip is focused
+- `[` and `]` change chart resolution when the chart is focused
+- type, `backspace`, `esc`, and `enter` control the chat panel when it is focused
+- in debug mode, `tab` also reaches the debug panel and typing filters the log stream
 
 ## Quality Checks
 
@@ -41,33 +109,3 @@ bun test
 - `tests/` deterministic automated tests
 - `docs/` design, implementation, and user docs
 - `scripts/` repeatable workflow helpers
-
-## Current Workflow
-
-1. `deepx` starts on `devnet` by default.
-2. Use `--network testnet` to switch to testnet.
-3. The app checks for a local encrypted wallet for that network.
-4. If no wallet exists, it prompts for private key import and a local passphrase.
-5. After import, the fullscreen dashboard opens with:
-   - pair strip
-   - realtime candle chart with volume bars
-   - orderbook panel
-   - recent trades panel
-   - AI chat panel powered by the in-process DeepX agent using `@google/genai` and `gemini-3-flash-preview`
-   - bottom status panel with CLI version and websocket delay
-   - optional debug panel with filtered internal logs when `--mode debug` is enabled
-
-## AI Chat
-
-- Set `GEMINI_API_KEY` or `GOOGLE_API_KEY` before launching the TUI to enable live chat replies
-- The chat agent runs in-process and can call the built-in DeepX tools directly
-- Supported tools currently cover market discovery plus order place, cancel, and open-order lookup flows
-- Simple order commands like `buy 0.001 ETH` are parsed locally against the active pair and require a separate `confirm` before real submission
-- AI chat can submit live perp orders with explicit confirmation and an unlocked session wallet, but still blocks AI-driven cancels
-- `--mode debug` enables a filtered debug panel for app, relay, HTTP, and websocket logs
-
-## Next Steps
-
-- Add a real order-entry workflow to the dashboard
-- Expand command routing and richer interactive screens
-- Reuse domain concepts from `deepdex-web` without copying web-specific UI concerns
