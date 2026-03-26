@@ -11,18 +11,18 @@ type ChatPromptContext = {
 };
 
 const MAX_CHAT_MESSAGES = 12;
-const MAX_GEMINI_HISTORY = 8;
+const MAX_GENAI_HISTORY = 8;
 
 export function createInitialChatMessages(): ChatMessage[] {
   return [
     createChatMessage(
       'assistant',
-      'Gemini copilot ready. Ask for pair context, market structure, or execution ideas.',
+      'DeepX agent ready. Ask for pair context, market structure, or execution ideas.',
       [],
     ),
     createChatMessage(
       'assistant',
-      'Set GEMINI_API_KEY to enable live replies from gemini-3-flash-preview.',
+      'Set GEMINI_API_KEY or GOOGLE_API_KEY to enable live replies from gemini-3-flash-previous.',
       [{ id: 'assistant-1', role: 'assistant', content: '' }],
     ),
   ];
@@ -55,7 +55,10 @@ export function buildChatSystemPrompt(context: ChatPromptContext): string {
     'You are DeepX Terminal Copilot inside a trading TUI.',
     'Respond in plain text only.',
     'Keep answers concise and terminal-friendly.',
-    'Do not claim to execute trades or place live orders.',
+    'Use the available DeepX tools when they improve accuracy for markets or orders.',
+    'AI chat is advisory-only for trading actions.',
+    'Never claim to execute trades or place live orders.',
+    'Use order tools for analysis and dry-run planning only.',
     `Active pair: ${context.pairLabel}.`,
     `Displayed price: ${context.priceLabel}.`,
     `Chart resolution: ${context.resolutionLabel}.`,
@@ -63,8 +66,8 @@ export function buildChatSystemPrompt(context: ChatPromptContext): string {
   ].join(' ');
 }
 
-export function buildGeminiContents(messages: ChatMessage[]) {
-  return messages.slice(-MAX_GEMINI_HISTORY).map((message) => ({
+export function buildGenAiContents(messages: ChatMessage[]) {
+  return messages.slice(-MAX_GENAI_HISTORY).map((message) => ({
     role: message.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: message.content }],
   }));

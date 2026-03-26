@@ -26,10 +26,12 @@
 - shared concepts can be ported intentionally later
 - web-specific presentation and framework choices should not leak into the TUI without justification
 
-## Gemini CLI Tooling
+## Agent Tooling
 
-- Gemini CLI chat can be extended with a local stdio MCP server defined in repository scripts
-- the MCP surface includes live perp `place` and `cancel` flows ported from `deepdex-web`, using the same contract call and `/v2/chain/tx/transact` relay pattern
+- the AI chat panel uses an in-process DeepX agent backed by the Google GenAI SDK
+- the agent exposes the existing DeepX order and market helpers as direct function tools instead of routing through MCP
+- the chat tool layer is advisory-only and intentionally blocks live order submission and cancellation until a dedicated confirmation workflow exists
+- live perp `place` and `cancel` flows remain ported from `deepdex-web`, using the same contract call and `/v2/chain/tx/transact` relay pattern
 - live execution requires the local encrypted wallet plus an explicit passphrase and confirmation flag at tool-call time
 - spot order execution remains out of scope until token approval and balance flows are ported
 

@@ -1,16 +1,13 @@
 {
   "name": "deepx-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "bin": {
-    "deepx": "./bin/deepx",
-    "deepx-mcp": "./bin/deepx-mcp"
+    "deepx": "./bin/deepx"
   },
   "scripts": {
     "dev": "bun run src/cli.tsx",
     "start": "bun run src/cli.tsx",
-    "mcp:deepx": "bun run scripts/gemini-deepx-mcp.ts",
-    "mcp:probe": "bun run scripts/probe-deepx-mcp.ts",
     "test": "bun test",
     "lint": "biome check .",
     "format": "biome format --write .",
@@ -20,6 +17,7 @@
     "bun": ">=1.2.19"
   },
   "dependencies": {
+    "@google/genai": "^1.46.0",
     "ethers": "^6.16.0",
     "ink": "^6.8.0",
     "react": "^19.2.4",

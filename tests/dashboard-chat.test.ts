@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   appendChatMessage,
   buildChatSystemPrompt,
-  buildGeminiContents,
+  buildGenAiContents,
   createChatMessage,
   createInitialChatMessages,
   getVisibleChatMessages,
@@ -20,9 +20,9 @@ describe('dashboard chat', () => {
     ).toContain('BTC-USDC');
   });
 
-  test('maps chat history into Gemini contents', () => {
+  test('maps chat history into GenAI contents', () => {
     expect(
-      buildGeminiContents([
+      buildGenAiContents([
         { id: 'user-1', role: 'user', content: 'hello' },
         { id: 'assistant-2', role: 'assistant', content: 'hi' },
       ]),

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
 describe('package bin entrypoints', () => {
-  test('exposes dedicated tui and mcp executables', () => {
+  test('exposes the deepx executable', () => {
     const packageJson = JSON.parse(
       readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
     ) as {
@@ -11,7 +11,6 @@ describe('package bin entrypoints', () => {
 
     expect(packageJson.bin).toEqual({
       deepx: './bin/deepx',
-      'deepx-mcp': './bin/deepx-mcp',
     });
   });
 });

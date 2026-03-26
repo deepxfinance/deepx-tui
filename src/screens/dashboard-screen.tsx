@@ -11,7 +11,7 @@ import {
   getVisibleChatMessages,
 } from '../lib/dashboard-chat';
 import { padRight, truncateMiddle } from '../lib/format';
-import { GEMINI_MODEL, requestGeminiChat } from '../services/gemini-chat';
+import { GENAI_MODEL, requestAgentChat } from '../services/agent-chat';
 import type { PairKind } from '../services/market-catalog';
 import { useMarketData } from '../services/use-market-data';
 
@@ -84,7 +84,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     setIsChatLoading(true);
 
     try {
-      const reply = await requestGeminiChat({
+      const reply = await requestAgentChat({
         messages: nextMessages,
         context: {
           pairLabel: activePair.label,
@@ -100,7 +100,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
         appendChatMessage(
           messages,
           'assistant',
-          `Gemini error: ${(error as Error).message}`,
+          `Agent error: ${(error as Error).message}`,
         ),
       );
     } finally {
@@ -331,7 +331,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
               </Text>
               <Text color="gray">
                 {isChatLoading
-                  ? `Thinking with ${GEMINI_MODEL}...`
+                  ? `Thinking with ${GENAI_MODEL}...`
                   : `Enter send Backspace edit Esc clear`}
               </Text>
             </Box>

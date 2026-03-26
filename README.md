@@ -16,7 +16,6 @@ bun install -g .
 ## Run
 
 ```bash
-gemini --help
 bun run dev
 ```
 
@@ -25,12 +24,6 @@ Or run the command entry directly:
 ```bash
 ./bin/deepx
 ./bin/deepx --network testnet
-```
-
-To start the MCP server directly:
-
-```bash
-./bin/deepx-mcp
 ```
 
 ## Quality Checks
@@ -59,42 +52,14 @@ bun test
    - realtime candle chart with volume bars
    - orderbook panel
    - recent trades panel
-   - AI chat panel powered by local `gemini-cli` using `gemini-3-flash-preview`
+   - AI chat panel powered by the in-process DeepX agent using `@google/genai` and `gemini-3-flash-previous`
 
-## MCP
+## AI Chat
 
-For a repo-local MCP server, use:
-
-```json
-{
-  "mcpServers": {
-    "deepx": {
-      "command": "bun",
-      "args": ["run", "--silent", "mcp:deepx"],
-      "cwd": "/absolute/path/to/deepx-tui",
-      "type": "stdio",
-      "trust": false,
-      "description": "DeepX order tools for Gemini CLI"
-    }
-  }
-}
-```
-
-After `bun install -g .`, the globally installed MCP executable is `deepx-mcp`:
-
-```json
-{
-  "mcpServers": {
-    "deepx": {
-      "command": "deepx-mcp",
-      "args": [],
-      "type": "stdio",
-      "trust": false,
-      "description": "DeepX order tools for Gemini CLI"
-    }
-  }
-}
-```
+- Set `GEMINI_API_KEY` or `GOOGLE_API_KEY` before launching the TUI to enable live chat replies
+- The chat agent runs in-process and can call the built-in DeepX tools directly
+- Supported tools currently cover market discovery plus order place, cancel, and open-order lookup flows
+- AI chat is advisory-only for trading actions and will not perform live order submission or cancellation
 
 ## Next Steps
 

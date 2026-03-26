@@ -16,28 +16,7 @@ Or invoke the executable directly:
 ./bin/deepx
 ```
 
-Start the local MCP server with:
-
-```bash
-bun run --silent mcp:deepx
-./bin/deepx-mcp
-```
-
-After `bun install -g .`, configure Gemini CLI or another MCP client with:
-
-```json
-{
-  "mcpServers": {
-    "deepx": {
-      "command": "deepx-mcp",
-      "args": [],
-      "type": "stdio",
-      "trust": false,
-      "description": "DeepX order tools for Gemini CLI"
-    }
-  }
-}
-```
+Set `GEMINI_API_KEY` or `GOOGLE_API_KEY` before launch if you want live AI chat replies.
 
 ## Current Behavior
 
@@ -48,9 +27,10 @@ After `bun install -g .`, configure Gemini CLI or another MCP client with:
 - if no wallet is found, it opens a simplified import flow with only private key and passphrase
 - after unlock or import, it opens the fullscreen market dashboard
 - the passphrase stays in process memory for the current session so later live order actions can reuse it
-- the AI chat panel uses local `gemini-cli` with Gemini `gemini-3-flash-preview`
-- Gemini CLI can also be configured with local DeepX dry-run order tools through the included MCP example
-- a global install exposes `deepx-mcp` for MCP clients while preserving `deepx` as the TUI command
+- the AI chat panel uses the Google GenAI SDK with `gemini-3-flash-previous`
+- the chat agent can call the built-in DeepX tools directly for market lookup and order workflows
+- the chat agent is advisory-only for trading actions and blocks live submission or cancellation
+- no MCP server is required for the dashboard chat flow
 
 ## Dashboard Keys
 
