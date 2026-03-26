@@ -10,6 +10,11 @@ import {
   createInitialChatMessages,
   getVisibleChatMessages,
 } from '../lib/dashboard-chat';
+import {
+  type DashboardFocusTarget,
+  formatChatComposerLine,
+  getPairKindShortcut,
+} from '../lib/dashboard-input';
 import { padRight, truncateMiddle } from '../lib/format';
 import { GENAI_MODEL, requestAgentChat } from '../services/agent-chat';
 import type { PairKind } from '../services/market-catalog';
@@ -20,7 +25,7 @@ type DashboardScreenProps = {
   walletAddress: string;
 };
 
-type FocusTarget = 'pairs' | 'chart' | 'orderbook' | 'chat';
+type FocusTarget = DashboardFocusTarget;
 
 const focusOrder: FocusTarget[] = ['pairs', 'chart', 'orderbook', 'chat'];
 const resolutions = ['1', '5', '15', '30', '60', '240', '1D', '1W', '1M'];
@@ -109,28 +114,11 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
   }
 
   useInput((input, key) => {
-    if (input === 'q') {
-      exit();
-      return;
-    }
-
     if (key.tab) {
       const currentIndex = focusOrder.indexOf(focusTarget);
       setFocusTarget(
         focusOrder[(currentIndex + 1) % focusOrder.length] ?? 'pairs',
       );
-      return;
-    }
-
-    if (input === '1') {
-      setPairKind('perp');
-      setPairIndex(0);
-      return;
-    }
-
-    if (input === '2') {
-      setPairKind('spot');
-      setPairIndex(0);
       return;
     }
 
@@ -154,6 +142,18 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
         setChatInput((value) => `${value}${input}`);
         return;
       }
+    }
+
+    if (input === 'q') {
+      exit();
+      return;
+    }
+
+    const nextPairKind = getPairKindShortcut(input, focusTarget);
+    if (nextPairKind) {
+      setPairKind(nextPairKind);
+      setPairIndex(0);
+      return;
     }
 
     if (focusTarget === 'pairs' && (key.leftArrow || input === 'h')) {
@@ -327,7 +327,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
               </Box>
               <Text color="gray">--------------------------------</Text>
               <Text color={focusTarget === 'chat' ? 'yellow' : 'gray'}>
-                {`> ${chatInput || 'Ask about the market, keys, or the current pair...'}`}
+                {formatChatComposerLine(chatInput, focusTarget)}
               </Text>
               <Text color="gray">
                 {isChatLoading
