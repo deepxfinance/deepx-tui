@@ -6,6 +6,7 @@ import {
   buildGenAiContents,
   createChatMessage,
   createInitialChatMessages,
+  getChatLoadingMessage,
   getVisibleChatMessages,
 } from '../src/lib/dashboard-chat';
 
@@ -74,5 +75,12 @@ describe('dashboard chat', () => {
       role: 'assistant',
       content: 'next',
     });
+  });
+
+  test('cycles a deterministic loading message', () => {
+    expect(getChatLoadingMessage(0)).toBe('Thinking.');
+    expect(getChatLoadingMessage(1)).toBe('Thinking..');
+    expect(getChatLoadingMessage(2)).toBe('Thinking...');
+    expect(getChatLoadingMessage(3)).toBe('Thinking.');
   });
 });

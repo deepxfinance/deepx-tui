@@ -31,6 +31,7 @@ Set `GEMINI_API_KEY` or `GOOGLE_API_KEY` before launch if you want live AI chat 
 - the passphrase stays in process memory for the current session so later live order actions can reuse it
 - the AI chat panel uses the Google GenAI SDK with `gemini-3-flash-preview`
 - the chat agent can call the built-in DeepX tools directly for market lookup and order workflows
+- while the agent is generating, the chat panel shows an animated `Thinking...` indicator in the transcript and status line
 - simple chat orders like `buy 0.001 ETH` or `sell 2 SOL at 150` are parsed locally against the active pair, then sent as real transactions after you reply `confirm`
 - those locally parsed chat orders reuse the unlocked session wallet and do not ask for the passphrase again
 - debug mode shows recent app logs plus HTTP/WebSocket request and response activity

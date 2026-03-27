@@ -1,7 +1,7 @@
 import process from 'node:process';
 import { Box, Text, useApp, useInput } from 'ink';
 import type { FC, ReactNode } from 'react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { CandleChart } from '../components/chart/candle-chart';
 import { DebugPanel } from '../components/debug-panel';
@@ -10,6 +10,7 @@ import { CLI_VERSION } from '../lib/cli-version';
 import {
   appendChatMessage,
   createInitialChatMessages,
+  getChatLoadingMessage,
   getVisibleChatMessages,
 } from '../lib/dashboard-chat';
 import {
@@ -24,7 +25,7 @@ import {
 } from '../lib/dashboard-status';
 import { formatErrorMessage, formatErrorWithStack } from '../lib/error-format';
 import { padRight, truncateMiddle } from '../lib/format';
-import { GENAI_MODEL, requestAgentChat } from '../services/agent-chat';
+import { requestAgentChat } from '../services/agent-chat';
 import {
   buildTradeIntentConfirmationMessage,
   isTradeConfirmationMessage,
@@ -46,6 +47,8 @@ type FocusTarget = DashboardFocusTarget;
 const resolutions = ['1', '5', '15', '30', '60', '240', '1D', '1W', '1M'];
 const UP_COLOR = '#28DE9C';
 const DOWN_COLOR = '#FF3131';
+const CHAT_USER_COLOR = '#FFD166';
+const CHAT_ASSISTANT_COLOR = '#7FDBFF';
 const PANEL_GAP = 0;
 const CHAT_INPUT_HEIGHT = 3;
 const TOP_BAR_HEIGHT = 6;
@@ -66,6 +69,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
   const [debugFilter, setDebugFilter] = useState('');
   const [chatMessages, setChatMessages] = useState(createInitialChatMessages);
   const [isChatLoading, setIsChatLoading] = useState(false);
+  const [chatLoadingFrame, setChatLoadingFrame] = useState(0);
   const [pendingChatTrade, setPendingChatTrade] =
     useState<ParsedChatTradeIntent>();
   const {
@@ -99,6 +103,19 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     () => getVisibleChatMessages(chatMessages, 6),
     [chatMessages],
   );
+
+  useEffect(() => {
+    if (!isChatLoading) {
+      setChatLoadingFrame(0);
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setChatLoadingFrame((value) => value + 1);
+    }, 250);
+
+    return () => clearInterval(timer);
+  }, [isChatLoading]);
 
   async function handleChatSubmit() {
     const content = chatInput.trim();
@@ -417,12 +434,21 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
                 {visibleChatMessages.map((message) => (
                   <Text
                     key={message.id}
-                    color={message.role === 'assistant' ? 'cyan' : 'white'}
+                    color={
+                      message.role === 'assistant'
+                        ? CHAT_ASSISTANT_COLOR
+                        : CHAT_USER_COLOR
+                    }
                   >
                     {message.role === 'assistant' ? 'AI> ' : 'You> '}
                     {message.content}
                   </Text>
                 ))}
+                {isChatLoading ? (
+                  <Text color={CHAT_ASSISTANT_COLOR}>
+                    AI&gt; {getChatLoadingMessage(chatLoadingFrame)}
+                  </Text>
+                ) : null}
               </Box>
               <Text color="gray">--------------------------------</Text>
               <Text color={focusTarget === 'chat' ? 'yellow' : 'gray'}>
@@ -430,7 +456,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
               </Text>
               <Text color="gray">
                 {isChatLoading
-                  ? `Thinking with ${GENAI_MODEL}...`
+                  ? getChatLoadingMessage(chatLoadingFrame)
                   : `Enter send Backspace edit Esc clear`}
               </Text>
             </Box>

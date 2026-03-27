@@ -13,6 +13,7 @@ type ChatPromptContext = {
 
 const MAX_CHAT_MESSAGES = 12;
 const MAX_GENAI_HISTORY = 8;
+const CHAT_LOADING_FRAMES = ['.', '..', '...'];
 
 export function createInitialChatMessages(): ChatMessage[] {
   return [
@@ -88,6 +89,13 @@ export function createChatMessage(
     role,
     content,
   };
+}
+
+export function getChatLoadingMessage(frameIndex: number): string {
+  const frame =
+    CHAT_LOADING_FRAMES[Math.abs(frameIndex) % CHAT_LOADING_FRAMES.length] ??
+    CHAT_LOADING_FRAMES[0];
+  return `Thinking${frame}`;
 }
 
 function getNextMessageId(messages: ChatMessage[]): number {
