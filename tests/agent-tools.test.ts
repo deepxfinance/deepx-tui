@@ -12,6 +12,8 @@ describe('agent tools', () => {
       'deepx_place_order',
       'deepx_cancel_order',
       'deepx_list_open_orders',
+      'deepx_close_position',
+      'deepx_update_position',
     ]);
   });
 
@@ -72,6 +74,45 @@ describe('agent tools', () => {
       orderId: 42,
       summary:
         'Live order cancellation is disabled in AI chat for order 42 on ETH-USDC.',
+      warnings: [
+        'AI chat is advisory-only for trading actions.',
+        'Use an explicit order-entry workflow for any live submission or cancellation.',
+      ],
+    });
+  });
+
+  test('blocks live close-position requests in AI chat mode', async () => {
+    const result = await executeDeepxAgentTool('deepx_close_position', {
+      network: 'deepx_devnet',
+      pair: 'ETH-USDC',
+      price: '2500',
+    });
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      network: 'deepx_devnet',
+      pair: 'ETH-USDC',
+      summary: 'Live position close is disabled in AI chat for ETH-USDC.',
+      warnings: [
+        'AI chat is advisory-only for trading actions.',
+        'Use an explicit order-entry workflow for any live submission or cancellation.',
+      ],
+    });
+  });
+
+  test('blocks live position-update requests in AI chat mode', async () => {
+    const result = await executeDeepxAgentTool('deepx_update_position', {
+      network: 'deepx_devnet',
+      pair: 'ETH-USDC',
+      takeProfit: '2800',
+      stopLoss: '2300',
+    });
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      network: 'deepx_devnet',
+      pair: 'ETH-USDC',
+      summary: 'Live position update is disabled in AI chat for ETH-USDC.',
       warnings: [
         'AI chat is advisory-only for trading actions.',
         'Use an explicit order-entry workflow for any live submission or cancellation.',

@@ -1,0 +1,444 @@
+import { formatUnits, parseUnits } from 'ethers';
+import { useEffect, useMemo, useState } from 'react';
+
+import type { NetworkConfig } from '../config/networks';
+import { padRight } from '../lib/format';
+import { logSocketEvent } from './logger';
+import type { MarketPair } from './market-catalog';
+
+export type PerpPosition = {
+  marketId: number;
+  isLong: boolean;
+  baseAssetAmount: bigint;
+  entryPrice: bigint;
+  leverage: number;
+  lastFundingRate: bigint;
+  isolatedMargin: bigint;
+  version: bigint;
+  unrealizedPnl: bigint;
+  realizedPnl: bigint;
+  fundingPayment: bigint;
+  owner: string;
+  takeProfit: bigint;
+  stopLoss: bigint;
+  liquidatePrice: bigint;
+};
+
+type WsMessage = {
+  channel?: string;
+  market?: { id?: number | string };
+  data?: {
+    address?: string;
+    positions?: {
+      items?: unknown[];
+    };
+  };
+};
+
+type PositionPanelRow = {
+  key: string;
+  text: string;
+  tone: 'green' | 'red' | 'white' | 'gray';
+};
+
+export function useUserPerpPositions(input: {
+  network: NetworkConfig;
+  walletAddress: string;
+  perpPairs: MarketPair[];
+}) {
+  const [positions, setPositions] = useState<PerpPosition[]>([]);
+  const walletAddress = input.walletAddress.toLowerCase();
+  const enabledPairs = useMemo(
+    () => input.perpPairs.filter((pair) => pair.kind === 'perp'),
+    [input.perpPairs],
+  );
+
+  useEffect(() => {
+    if (!walletAddress || enabledPairs.length === 0) {
+      setPositions([]);
+      return;
+    }
+
+    const websocket = new WebSocket(input.network.marketWsUrl);
+    const heartbeat = setInterval(() => {
+      if (websocket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
+      const payload = JSON.stringify({ action: 'ping' });
+      logSocketEvent({
+        scope: 'positions-ws',
+        url: input.network.marketWsUrl,
+        event: 'send',
+        payload,
+      });
+      websocket.send(payload);
+    }, 30000);
+
+    websocket.addEventListener('open', () => {
+      const payload = JSON.stringify({
+        action: 'multi_subscribe',
+        markets: enabledPairs.map((pair) => ({
+          type: 'perp',
+          id: pair.marketId ?? Number(pair.pairId),
+        })),
+        subscriptions: [
+          {
+            channel: 'user_perp_positions',
+            address: input.walletAddress,
+            addressType: 'wallet',
+            status: 'open',
+          },
+        ],
+        options: {
+          compress: false,
+        },
+      });
+      logSocketEvent({
+        scope: 'positions-ws',
+        url: input.network.marketWsUrl,
+        event: 'open',
+        payload,
+      });
+      websocket.send(payload);
+    });
+
+    websocket.addEventListener('message', (event) => {
+      const payload = String(event.data);
+      logSocketEvent({
+        scope: 'positions-ws',
+        url: input.network.marketWsUrl,
+        event: 'message',
+        payload,
+      });
+      const update = parseUserPerpPositionsMessage(
+        payload,
+        input.walletAddress,
+        enabledPairs,
+      );
+      if (!update) {
+        return;
+      }
+
+      setPositions((current) =>
+        mergePerpPositions(
+          current,
+          update.positions,
+          update.owner,
+          update.marketId,
+        ),
+      );
+    });
+
+    websocket.addEventListener('close', () => {
+      logSocketEvent({
+        scope: 'positions-ws',
+        url: input.network.marketWsUrl,
+        event: 'close',
+      });
+    });
+
+    websocket.addEventListener('error', () => {
+      logSocketEvent({
+        scope: 'positions-ws',
+        url: input.network.marketWsUrl,
+        event: 'error',
+      });
+    });
+
+    return () => {
+      clearInterval(heartbeat);
+      websocket.close();
+    };
+  }, [
+    enabledPairs,
+    input.network.marketWsUrl,
+    input.walletAddress,
+    walletAddress,
+  ]);
+
+  return positions;
+}
+
+export function parseUserPerpPositionsMessage(
+  rawMessage: string,
+  walletAddress: string,
+  perpPairs: MarketPair[],
+): {
+  owner: string;
+  marketId?: number;
+  positions: PerpPosition[];
+} | null {
+  let message: WsMessage;
+  try {
+    message = JSON.parse(rawMessage) as WsMessage;
+  } catch {
+    return null;
+  }
+
+  if (message.channel !== 'user_perp_positions' || !message.data) {
+    return null;
+  }
+
+  const owner = message.data.address?.toLowerCase();
+  if (!owner || owner !== walletAddress.toLowerCase()) {
+    return null;
+  }
+
+  const enabledMarketIds = new Set(
+    perpPairs
+      .filter((pair) => pair.kind === 'perp')
+      .map((pair) => pair.marketId ?? Number(pair.pairId)),
+  );
+  const items = Array.isArray(message.data.positions?.items)
+    ? message.data.positions.items
+    : [];
+  const positions = items
+    .filter((entry) => isEnabledRawPosition(entry, enabledMarketIds))
+    .map((entry) => mapRawPosition(entry, perpPairs));
+
+  return {
+    owner,
+    marketId:
+      message.market?.id == null ? undefined : Number(message.market.id),
+    positions,
+  };
+}
+
+export function mergePerpPositions(
+  existing: PerpPosition[],
+  incoming: PerpPosition[],
+  owner: string,
+  marketId?: number,
+) {
+  const normalizedOwner = owner.toLowerCase();
+  if (marketId != null) {
+    const next = existing.filter(
+      (position) =>
+        !(
+          position.marketId === Number(marketId) &&
+          position.owner.toLowerCase() === normalizedOwner
+        ),
+    );
+    return [...next, ...incoming];
+  }
+
+  if (incoming.length === 0) {
+    return existing.filter(
+      (position) => position.owner.toLowerCase() !== normalizedOwner,
+    );
+  }
+
+  let next = [...existing];
+  const incomingMarketIds = new Set(
+    incoming.map((position) => position.marketId),
+  );
+  for (const nextMarketId of incomingMarketIds) {
+    next = next.filter(
+      (position) =>
+        !(
+          position.marketId === nextMarketId &&
+          position.owner.toLowerCase() === normalizedOwner
+        ),
+    );
+  }
+
+  return [...next, ...incoming];
+}
+
+export function buildPositionPanelRows(input: {
+  positions: PerpPosition[];
+  pairs: MarketPair[];
+  overview: Record<string, { latestPrice?: number }>;
+  maxRows: number;
+}): PositionPanelRow[] {
+  if (input.positions.length === 0) {
+    return [{ key: 'empty', text: 'No open perp positions.', tone: 'gray' }];
+  }
+
+  const rows = input.positions
+    .slice()
+    .sort((left, right) => left.marketId - right.marketId)
+    .slice(0, input.maxRows);
+
+  return rows.map((position) => {
+    const pair = input.pairs.find(
+      (entry) => (entry.marketId ?? Number(entry.pairId)) === position.marketId,
+    );
+    const pairLabel = pair?.label ?? `#${position.marketId}`;
+    const sideLabel = `${position.isLong ? 'LONG' : 'SHRT'}${clampLeverage(
+      position.leverage,
+    )}`;
+    const sizeLabel = formatAssetAmount(
+      position.baseAssetAmount,
+      pair?.baseDecimals ?? 18,
+      pair?.orderDecimal ?? 3,
+    );
+    const entryLabel = formatMoney(
+      position.entryPrice,
+      6,
+      pair?.priceDecimal ?? 2,
+    );
+    const pnlValue = resolvePositionPnl(
+      position,
+      pair,
+      input.overview[pairLabel]?.latestPrice,
+    );
+    const pnlLabel = formatSignedMoney(pnlValue, 6, 2);
+
+    return {
+      key: `${position.owner}-${position.marketId}`,
+      text: `${padRight(pairLabel, 8)} ${padRight(sideLabel, 7)} ${padRight(
+        sizeLabel,
+        7,
+      )} ${padRight(entryLabel, 8)} ${pnlLabel}`,
+      tone: pnlValue > 0n ? 'green' : pnlValue < 0n ? 'red' : 'white',
+    };
+  });
+}
+
+export function getPositionPanelHeader() {
+  return `${padRight('MARKET', 8)} ${padRight('SIDE', 7)} ${padRight(
+    'SIZE',
+    7,
+  )} ${padRight('ENTRY', 8)} PNL`;
+}
+
+function mapRawPosition(raw: unknown, perpPairs: MarketPair[]): PerpPosition {
+  const entry = raw as Record<string, unknown>;
+  const marketId = Number(entry.market_id ?? entry.marketId ?? 0);
+  const pair = perpPairs.find(
+    (candidate) =>
+      (candidate.marketId ?? Number(candidate.pairId)) === marketId,
+  );
+  const baseDecimals = pair?.baseDecimals ?? 18;
+
+  return {
+    marketId,
+    isLong: Boolean(entry.is_long ?? entry.isLong),
+    baseAssetAmount: parseUnitValue(
+      entry.base_asset_amount ?? entry.baseAssetAmount,
+      baseDecimals,
+    ),
+    entryPrice: parseUnitValue(entry.entry_price ?? entry.entryPrice, 6),
+    leverage: Number(entry.leverage ?? 0),
+    lastFundingRate: parseUnitValue(
+      entry.last_funding_rate ?? entry.lastFundingRate,
+      18,
+    ),
+    isolatedMargin: parseUnitValue(
+      entry.isolated_margin ?? entry.isolatedMargin,
+      6,
+    ),
+    version: BigInt(Number(entry.version ?? 0)),
+    unrealizedPnl: parseUnitValue(entry.unrealized_pnl ?? entry.pnl ?? 0, 6),
+    realizedPnl: parseUnitValue(
+      entry.realized_pnl ?? entry.realizedPnl ?? 0,
+      6,
+    ),
+    fundingPayment: parseUnitValue(
+      entry.funding_payment ?? entry.fundingPayment ?? 0,
+      6,
+    ),
+    owner: String(entry.owner ?? ''),
+    takeProfit: parseUnitValue(entry.take_profit ?? entry.takeProfit ?? 0, 6),
+    stopLoss: parseUnitValue(entry.stop_loss ?? entry.stopLoss ?? 0, 6),
+    liquidatePrice: parseUnitValue(
+      entry.liquidate_price ?? entry.liquidatePrice ?? 0,
+      6,
+    ),
+  };
+}
+
+function isEnabledRawPosition(raw: unknown, enabledMarketIds: Set<number>) {
+  const entry = raw as Record<string, unknown>;
+  const marketId = Number(entry.market_id ?? entry.marketId);
+  if (!enabledMarketIds.has(marketId)) {
+    return false;
+  }
+
+  return Number(entry.base_asset_amount ?? entry.baseAssetAmount ?? 0) !== 0;
+}
+
+function parseUnitValue(value: unknown, decimals: number): bigint {
+  const normalized = normalizeDecimal(value, decimals);
+  if (!normalized) {
+    return 0n;
+  }
+
+  return parseUnits(normalized, decimals);
+}
+
+function normalizeDecimal(value: unknown, decimals: number) {
+  if (value == null) {
+    return '0';
+  }
+
+  const normalized = String(value).replaceAll(',', '').trim();
+  if (!normalized) {
+    return '0';
+  }
+
+  if (/^-?\d+(\.\d+)?$/.test(normalized)) {
+    const [whole, fraction = ''] = normalized.split('.');
+    const trimmedFraction = fraction.slice(0, decimals);
+    return trimmedFraction ? `${whole}.${trimmedFraction}` : whole;
+  }
+
+  const numericValue = Number(normalized);
+  if (!Number.isFinite(numericValue)) {
+    return '0';
+  }
+
+  return numericValue.toFixed(Math.min(decimals, 6));
+}
+
+function resolvePositionPnl(
+  position: PerpPosition,
+  pair: MarketPair | undefined,
+  latestPrice?: number,
+) {
+  if (!pair || latestPrice == null || !Number.isFinite(latestPrice)) {
+    return position.unrealizedPnl;
+  }
+
+  const markPrice = priceToSixDecimals(latestPrice);
+  let pnl = (markPrice - position.entryPrice) * position.baseAssetAmount;
+  if (!position.isLong) {
+    pnl = -pnl;
+  }
+
+  return pnl / 10n ** BigInt(pair.baseDecimals);
+}
+
+function priceToSixDecimals(value: number) {
+  return BigInt(Math.round(value * 1_000_000));
+}
+
+function formatAssetAmount(value: bigint, decimals: number, digits: number) {
+  return trimDecimal(formatUnits(value, decimals), digits);
+}
+
+function formatMoney(value: bigint, decimals: number, digits: number) {
+  return trimDecimal(formatUnits(value, decimals), digits);
+}
+
+function formatSignedMoney(value: bigint, decimals: number, digits: number) {
+  const sign = value > 0n ? '+' : value < 0n ? '-' : '';
+  const absoluteValue = value < 0n ? -value : value;
+  return `${sign}${formatMoney(absoluteValue, decimals, digits)}`;
+}
+
+function trimDecimal(value: string, digits: number) {
+  const [whole, fraction = ''] = value.split('.');
+  const trimmedFraction = fraction.slice(0, digits).replace(/0+$/, '');
+  return trimmedFraction ? `${whole}.${trimmedFraction}` : whole;
+}
+
+function clampLeverage(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return '';
+  }
+
+  return `${Math.min(value, 99)}x`;
+}

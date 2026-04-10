@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
 import {
+  buildDryRunClosePosition,
   buildDryRunOrder,
+  buildDryRunPositionUpdate,
   listOpenOrdersDryRun,
   listSupportedMarkets,
   resolveLivePassphrase,
@@ -70,5 +72,40 @@ describe('order tools', () => {
     rememberWalletPassphrase('deepx_devnet', 'session-secret');
 
     expect(resolveLivePassphrase('deepx_devnet')).toBe('session-secret');
+  });
+
+  test('builds a dry-run close-position ticket', () => {
+    expect(
+      buildDryRunClosePosition({
+        pair: 'ETH-USDC',
+        price: '2500.5',
+        confirm: true,
+      }),
+    ).toMatchObject({
+      status: 'dry_run',
+      network: 'deepx_devnet',
+      pair: 'ETH-USDC',
+      action: 'close_position',
+      price: '2500.50',
+      slippage: '10',
+    });
+  });
+
+  test('builds a dry-run position update ticket', () => {
+    expect(
+      buildDryRunPositionUpdate({
+        pair: 'ETH-USDC',
+        takeProfit: '2800',
+        stopLoss: '2300',
+        confirm: true,
+      }),
+    ).toMatchObject({
+      status: 'dry_run',
+      network: 'deepx_devnet',
+      pair: 'ETH-USDC',
+      action: 'update_position',
+      takeProfit: '2800.00',
+      stopLoss: '2300.00',
+    });
   });
 });

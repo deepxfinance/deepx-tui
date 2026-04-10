@@ -8,6 +8,7 @@ export type MarketPair = {
   pairId: string;
   priceDecimal: number;
   orderDecimal: number;
+  baseDecimals: number;
   baseSymbol: string;
   quoteSymbol: string;
   marketId?: number;
@@ -22,6 +23,7 @@ export function getMarketPairs(_network: NetworkConfig): MarketPair[] {
       marketId: 3,
       priceDecimal: 2,
       orderDecimal: 3,
+      baseDecimals: 18,
       baseSymbol: 'ETH',
       quoteSymbol: 'USDC',
     },
@@ -32,6 +34,7 @@ export function getMarketPairs(_network: NetworkConfig): MarketPair[] {
       marketId: 4,
       priceDecimal: 2,
       orderDecimal: 2,
+      baseDecimals: 9,
       baseSymbol: 'SOL',
       quoteSymbol: 'USDC',
     },
@@ -41,6 +44,7 @@ export function getMarketPairs(_network: NetworkConfig): MarketPair[] {
       pairId: '3',
       priceDecimal: 4,
       orderDecimal: 3,
+      baseDecimals: 18,
       baseSymbol: 'ETH',
       quoteSymbol: 'USDC',
     },
@@ -50,6 +54,7 @@ export function getMarketPairs(_network: NetworkConfig): MarketPair[] {
       pairId: '4',
       priceDecimal: 4,
       orderDecimal: 2,
+      baseDecimals: 9,
       baseSymbol: 'SOL',
       quoteSymbol: 'USDC',
     },

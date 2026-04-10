@@ -3,9 +3,11 @@ import type { FunctionDeclaration } from '@google/genai';
 import type { RuntimeNetwork } from '../config/networks';
 import {
   cancelOrderTool,
+  closePositionTool,
   listOpenOrdersDryRun,
   listSupportedMarkets,
   placeOrderTool,
+  updatePositionTool,
 } from './order-tools';
 import { listLivePerpPairs } from './perp-trading';
 
@@ -13,7 +15,9 @@ export type DeepxAgentToolName =
   | 'deepx_list_markets'
   | 'deepx_place_order'
   | 'deepx_cancel_order'
-  | 'deepx_list_open_orders';
+  | 'deepx_list_open_orders'
+  | 'deepx_close_position'
+  | 'deepx_update_position';
 
 type ToolArguments = Record<string, unknown>;
 
@@ -97,6 +101,56 @@ export const DEEPX_AGENT_TOOL_DECLARATIONS = [
       },
     },
   },
+  {
+    name: 'deepx_close_position',
+    description:
+      'Close a DeepX perp position at a limit price. Requires confirm=true and a wallet passphrase for live execution.',
+    parametersJsonSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['pair', 'price'],
+      properties: {
+        network: {
+          type: 'string',
+          enum: ['deepx_devnet', 'deepx_testnet'],
+          default: 'deepx_devnet',
+        },
+        pair: { type: 'string' },
+        price: { anyOf: [{ type: 'string' }, { type: 'number' }] },
+        slippage: {
+          anyOf: [{ type: 'string' }, { type: 'number' }],
+          default: 10,
+        },
+        passphrase: { type: 'string' },
+        confirm: { type: 'boolean', default: false },
+      },
+    },
+  },
+  {
+    name: 'deepx_update_position',
+    description:
+      'Update DeepX perp position take-profit and stop-loss points. For live execution, both takeProfit and stopLoss must be supplied. Use 0 to clear either trigger.',
+    parametersJsonSchema: {
+      type: 'object',
+      additionalProperties: false,
+      anyOf: [
+        { required: ['pair', 'takeProfit'] },
+        { required: ['pair', 'stopLoss'] },
+      ],
+      properties: {
+        network: {
+          type: 'string',
+          enum: ['deepx_devnet', 'deepx_testnet'],
+          default: 'deepx_devnet',
+        },
+        pair: { type: 'string' },
+        takeProfit: { anyOf: [{ type: 'string' }, { type: 'number' }] },
+        stopLoss: { anyOf: [{ type: 'string' }, { type: 'number' }] },
+        passphrase: { type: 'string' },
+        confirm: { type: 'boolean', default: false },
+      },
+    },
+  },
 ] as const satisfies FunctionDeclaration[];
 
 export const DEEPX_AGENT_TOOL_NAMES = DEEPX_AGENT_TOOL_DECLARATIONS.map(
@@ -170,6 +224,56 @@ export async function executeDeepxAgentTool(
       });
     case 'deepx_list_open_orders':
       return listOpenOrdersDryRun(normalizeNetwork(args.network));
+    case 'deepx_close_position':
+      if (
+        !allowLiveExecution &&
+        (hasLiveExecutionRequest(args) ||
+          isLivePerpPair(String(args.pair ?? '')))
+      ) {
+        return buildLiveExecutionBlockedResult({
+          action: 'close_position',
+          network: normalizeNetwork(args.network),
+          pair: String(args.pair ?? ''),
+        });
+      }
+
+      return await closePositionTool({
+        network: normalizeNetwork(args.network),
+        pair: String(args.pair ?? ''),
+        price: args.price as string | number,
+        slippage: args.slippage as string | number | undefined,
+        passphrase: allowLiveExecution
+          ? (args.passphrase as string | undefined)
+          : undefined,
+        confirm: allowLiveExecution
+          ? (args.confirm as boolean | undefined)
+          : false,
+      });
+    case 'deepx_update_position':
+      if (
+        !allowLiveExecution &&
+        (hasLiveExecutionRequest(args) ||
+          isLivePerpPair(String(args.pair ?? '')))
+      ) {
+        return buildLiveExecutionBlockedResult({
+          action: 'update_position',
+          network: normalizeNetwork(args.network),
+          pair: String(args.pair ?? ''),
+        });
+      }
+
+      return await updatePositionTool({
+        network: normalizeNetwork(args.network),
+        pair: String(args.pair ?? ''),
+        takeProfit: args.takeProfit as string | number | undefined,
+        stopLoss: args.stopLoss as string | number | undefined,
+        passphrase: allowLiveExecution
+          ? (args.passphrase as string | undefined)
+          : undefined,
+        confirm: allowLiveExecution
+          ? (args.confirm as boolean | undefined)
+          : false,
+      });
     default:
       throw new Error(`Unknown tool "${name}".`);
   }
@@ -191,7 +295,7 @@ function isLivePerpPair(pair: string) {
 }
 
 function buildLiveExecutionBlockedResult(input: {
-  action: 'place_order' | 'cancel_order';
+  action: 'place_order' | 'cancel_order' | 'close_position' | 'update_position';
   network: RuntimeNetwork;
   pair: string;
   orderId?: number;
@@ -206,10 +310,25 @@ function buildLiveExecutionBlockedResult(input: {
     network: input.network,
     pair: input.pair,
     orderId: input.orderId,
-    summary: `Live ${input.action === 'place_order' ? 'order placement' : 'order cancellation'} is disabled in AI chat for ${orderLabel}.`,
+    summary: `Live ${describeBlockedAction(input.action)} is disabled in AI chat for ${orderLabel}.`,
     warnings: [
       'AI chat is advisory-only for trading actions.',
       'Use an explicit order-entry workflow for any live submission or cancellation.',
     ],
   };
+}
+
+function describeBlockedAction(
+  action: 'place_order' | 'cancel_order' | 'close_position' | 'update_position',
+) {
+  switch (action) {
+    case 'place_order':
+      return 'order placement';
+    case 'cancel_order':
+      return 'order cancellation';
+    case 'close_position':
+      return 'position close';
+    case 'update_position':
+      return 'position update';
+  }
 }

@@ -2,8 +2,10 @@ import { getNetworkConfig, type RuntimeNetwork } from '../config/networks';
 import { getMarketPairs, type PairKind } from './market-catalog';
 import {
   cancelPerpOrderLive,
+  closePerpPositionLive,
   listLivePerpPairs,
   placePerpOrderLive,
+  updatePerpPositionLive,
 } from './perp-trading';
 import { getRememberedWalletPassphrase } from './wallet-session';
 
@@ -33,6 +35,19 @@ export type OrderToolResult = {
   price?: string;
   tif: 'GTC' | 'IOC' | 'FOK';
   notional?: string;
+  warnings: string[];
+  summary: string;
+};
+
+export type PositionToolResult = {
+  status: 'dry_run';
+  network: RuntimeNetwork;
+  pair: string;
+  action: 'close_position' | 'update_position';
+  price?: string;
+  slippage?: string;
+  takeProfit?: string;
+  stopLoss?: string;
   warnings: string[];
   summary: string;
 };
@@ -90,6 +105,73 @@ export async function cancelOrderTool(input: {
     status: 'dry_run',
     summary: `Cancel order ${input.orderId} on ${input.pair} is not implemented for this market.`,
   };
+}
+
+export async function closePositionTool(input: {
+  network?: RuntimeNetwork;
+  pair: string;
+  price: string | number;
+  slippage?: string | number;
+  passphrase?: string;
+  confirm?: boolean;
+}) {
+  const network = input.network ?? 'deepx_devnet';
+  const livePair = asLivePerpPair(input.pair);
+  if (livePair) {
+    const passphrase = resolveLivePassphrase(network, input.passphrase);
+    if (!passphrase) {
+      throw new Error(
+        'Live position close requires passphrase. Unlock the wallet in this session or provide passphrase explicitly.',
+      );
+    }
+
+    return closePerpPositionLive({
+      network,
+      pair: livePair,
+      price: input.price,
+      slippage: input.slippage,
+      passphrase,
+      confirm: input.confirm ?? false,
+    });
+  }
+
+  return buildDryRunClosePosition(input);
+}
+
+export async function updatePositionTool(input: {
+  network?: RuntimeNetwork;
+  pair: string;
+  takeProfit?: string | number;
+  stopLoss?: string | number;
+  passphrase?: string;
+  confirm?: boolean;
+}) {
+  const network = input.network ?? 'deepx_devnet';
+  const livePair = asLivePerpPair(input.pair);
+  if (livePair) {
+    const passphrase = resolveLivePassphrase(network, input.passphrase);
+    if (!passphrase) {
+      throw new Error(
+        'Live position update requires passphrase. Unlock the wallet in this session or provide passphrase explicitly.',
+      );
+    }
+    if (input.takeProfit == null || input.stopLoss == null) {
+      throw new Error(
+        'Live position update requires both takeProfit and stopLoss. Use 0 to clear either trigger.',
+      );
+    }
+
+    return updatePerpPositionLive({
+      network,
+      pair: livePair,
+      takeProfit: input.takeProfit,
+      stopLoss: input.stopLoss,
+      passphrase,
+      confirm: input.confirm ?? false,
+    });
+  }
+
+  return buildDryRunPositionUpdate(input);
 }
 
 export function listSupportedMarkets(network: RuntimeNetwork) {
@@ -156,6 +238,93 @@ export function listOpenOrdersDryRun(network: RuntimeNetwork) {
   };
 }
 
+export function buildDryRunClosePosition(input: {
+  network?: RuntimeNetwork;
+  pair: string;
+  price: string | number;
+  slippage?: string | number;
+  confirm?: boolean;
+}): PositionToolResult {
+  const network = input.network ?? 'deepx_devnet';
+  const pair = findPair(network, input.pair);
+  const price = normalizeDecimal(input.price, pair.priceDecimal, 'price');
+  const slippage = normalizeIntegerString(input.slippage, 'slippage', '10');
+  const warnings = [
+    'Dry-run only. No live position close was submitted.',
+    'This tool needs an unlocked wallet session plus explicit confirmation for live execution.',
+  ];
+
+  if (!input.confirm) {
+    warnings.unshift(
+      'Confirmation flag was not set. Treat this as a planning ticket only.',
+    );
+  }
+
+  return {
+    status: 'dry_run',
+    network,
+    pair: pair.label,
+    action: 'close_position',
+    price,
+    slippage,
+    warnings,
+    summary: `${network} close position on ${pair.label} @ ${price} with slippage ${slippage}`,
+  };
+}
+
+export function buildDryRunPositionUpdate(input: {
+  network?: RuntimeNetwork;
+  pair: string;
+  takeProfit?: string | number;
+  stopLoss?: string | number;
+  confirm?: boolean;
+}): PositionToolResult {
+  const network = input.network ?? 'deepx_devnet';
+  const pair = findPair(network, input.pair);
+  const takeProfit =
+    input.takeProfit == null
+      ? undefined
+      : normalizeNonNegativeDecimal(
+          input.takeProfit,
+          pair.priceDecimal,
+          'takeProfit',
+        );
+  const stopLoss =
+    input.stopLoss == null
+      ? undefined
+      : normalizeNonNegativeDecimal(
+          input.stopLoss,
+          pair.priceDecimal,
+          'stopLoss',
+        );
+
+  if (!takeProfit && !stopLoss) {
+    throw new Error('Position update requires takeProfit, stopLoss, or both.');
+  }
+
+  const warnings = [
+    'Dry-run only. No live position update was submitted.',
+    'Live execution currently requires both takeProfit and stopLoss values. Use 0 to clear either trigger.',
+  ];
+
+  if (!input.confirm) {
+    warnings.unshift(
+      'Confirmation flag was not set. Treat this as a planning ticket only.',
+    );
+  }
+
+  return {
+    status: 'dry_run',
+    network,
+    pair: pair.label,
+    action: 'update_position',
+    takeProfit,
+    stopLoss,
+    warnings,
+    summary: `${network} update position on ${pair.label} with TP ${takeProfit ?? 'unchanged'} and SL ${stopLoss ?? 'unchanged'}`,
+  };
+}
+
 export function resolveLivePassphrase(
   network: RuntimeNetwork,
   passphrase?: string,
@@ -215,6 +384,36 @@ function normalizeDecimal(
   }
 
   return numeric.toFixed(decimals);
+}
+
+function normalizeNonNegativeDecimal(
+  value: string | number | undefined,
+  decimals: number,
+  field: 'takeProfit' | 'stopLoss',
+): string {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    throw new Error(`Invalid ${field}. Expected a non-negative number.`);
+  }
+
+  return numeric.toFixed(decimals);
+}
+
+function normalizeIntegerString(
+  value: string | number | undefined,
+  field: 'slippage',
+  fallback: string,
+) {
+  if (value == null) {
+    return fallback;
+  }
+
+  const numeric = Number(value);
+  if (!Number.isInteger(numeric) || numeric < 0) {
+    throw new Error(`Invalid ${field}. Expected a non-negative integer.`);
+  }
+
+  return String(numeric);
 }
 
 function formatNotional(price: string, size: string): string {

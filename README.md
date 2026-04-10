@@ -63,8 +63,8 @@ Direct entrypoint:
 - startup stays simple: parse CLI flags, resolve network, load wallet metadata, unlock or import wallet, then enter the dashboard
 - wallet storage is local and per-network
 - successful unlock keeps the wallet passphrase in process memory for the active session
-- the dashboard is a fullscreen layout with a market strip, realtime candle chart, orderbook, recent trades, AI chat, and bottom status bar
-- `--mode debug` enables a live debug panel with filtered app, HTTP, RPC, and websocket logs
+- the dashboard is a fullscreen layout with a market strip, realtime candle chart, orderbook, recent trades, AI chat, a live perp positions panel, and bottom status bar
+- `--mode debug` splits the lower utility row between the live perp positions panel and a filtered debug log panel
 - sensitive values such as `privateKey`, `passphrase`, and `signedTx` are redacted before entering logs
 
 ## Current Workflow
@@ -82,7 +82,9 @@ Direct entrypoint:
 - the agent runs in-process and calls built-in DeepX market and order helpers directly
 - simple trade messages such as `buy 0.001 ETH` or `sell 2 SOL at 150` are parsed locally against the active pair and staged for confirmation
 - confirmed perp orders can be submitted as live transactions when the wallet is already unlocked for the session
+- the agent tool layer also understands perp position-close and TP/SL update requests
 - AI-driven order cancellation remains blocked until a dedicated confirmation flow exists
+- AI-driven position close and TP/SL updates are exposed to the model but still blocked from live execution in chat
 
 ## Dashboard Keys
 

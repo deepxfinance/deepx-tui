@@ -2,10 +2,12 @@ import { describe, expect, test } from 'bun:test';
 
 import { getNetworkConfig } from '../src/config/networks';
 import {
+  closePerpPositionLive,
   formatRpcFailureMessage,
   getTransactionSubmissionRpcUrl,
   listLivePerpPairs,
   placePerpOrderLive,
+  updatePerpPositionLive,
 } from '../src/services/perp-trading';
 
 describe('perp trading config', () => {
@@ -32,6 +34,29 @@ describe('perp trading config', () => {
         confirm: false,
       }),
     ).rejects.toThrow('Live order submission requires confirm=true.');
+  });
+
+  test('requires explicit confirmation for live position closes', async () => {
+    await expect(
+      closePerpPositionLive({
+        pair: 'ETH-USDC',
+        price: '1000',
+        passphrase: 'secret',
+        confirm: false,
+      }),
+    ).rejects.toThrow('Live position close requires confirm=true.');
+  });
+
+  test('requires explicit confirmation for live position updates', async () => {
+    await expect(
+      updatePerpPositionLive({
+        pair: 'ETH-USDC',
+        takeProfit: '1200',
+        stopLoss: '900',
+        passphrase: 'secret',
+        confirm: false,
+      }),
+    ).rejects.toThrow('Live position update requires confirm=true.');
   });
 
   test('uses the network rpc url for transaction submission', () => {

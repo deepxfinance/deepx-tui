@@ -59,6 +59,7 @@ export function buildChatSystemPrompt(context: ChatPromptContext): string {
     'Keep answers concise and terminal-friendly.',
     'Use the available DeepX tools when they improve accuracy for markets or orders.',
     'Use deepx_place_order for live perp order placement only when the user explicitly wants execution.',
+    'Use deepx_close_position for position exits and deepx_update_position for take-profit or stop-loss changes when those actions are requested.',
     context.walletUnlocked
       ? 'The wallet for this session is already unlocked. Do not ask for the passphrase again and omit passphrase from order tool calls unless the user explicitly wants to override it.'
       : 'A live perp order requires confirm=true and either a wallet passphrase or an already unlocked session wallet.',

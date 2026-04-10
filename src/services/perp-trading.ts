@@ -8,6 +8,8 @@ const PERP_CONTRACT_ADDRESS = '0x000000000000000000000000000000000000044E';
 const PERP_ABI = [
   'function placePerpOrder(address subaccount,uint256 marketId,bool isLong,uint256 size,uint256 price,uint8 orderType,uint16 leverage,uint256 takeProfit,uint256 stopLoss,bool reduceOnly,uint8 postOnly)',
   'function cancelOrder(address subaccount,uint256 marketId,uint256 orderId)',
+  'function closePosition(address subaccount,uint16 marketId,uint128 price,uint64 slippage)',
+  'function setProfitAndLossPoint(address subaccount,uint16 marketId,uint128 takeProfitPoint,uint128 stopLossPoint)',
 ] as const;
 
 type PerpPair = 'ETH-USDC' | 'SOL-USDC';
@@ -32,6 +34,24 @@ type CancelPerpOrderInput = {
   network?: RuntimeNetwork;
   pair: PerpPair;
   orderId: number;
+  passphrase: string;
+  confirm: boolean;
+};
+
+type ClosePerpPositionInput = {
+  network?: RuntimeNetwork;
+  pair: PerpPair;
+  price: string | number;
+  slippage?: string | number;
+  passphrase: string;
+  confirm: boolean;
+};
+
+type UpdatePerpPositionInput = {
+  network?: RuntimeNetwork;
+  pair: PerpPair;
+  takeProfit: string | number;
+  stopLoss: string | number;
   passphrase: string;
   confirm: boolean;
 };
@@ -193,6 +213,130 @@ export async function cancelPerpOrderLive(
   };
 }
 
+export async function closePerpPositionLive(
+  input: ClosePerpPositionInput,
+): Promise<{
+  status: 'submitted';
+  network: RuntimeNetwork;
+  pair: PerpPair;
+  txHash: string;
+  explorerUrl: string;
+  summary: string;
+}> {
+  if (!input.confirm) {
+    throw new Error('Live position close requires confirm=true.');
+  }
+
+  const networkId = input.network ?? 'deepx_devnet';
+  const network = getNetworkConfig(networkId);
+  const walletRecord = await readWalletRecord(networkId);
+  if (!walletRecord) {
+    throw new Error(`No local wallet found for ${networkId}.`);
+  }
+
+  const privateKey = decryptPrivateKey(walletRecord.crypto, input.passphrase);
+  const provider = new JsonRpcProvider(network.rpcUrl);
+  const signer = new Wallet(privateKey, provider);
+  const market = perpMarkets[input.pair];
+  const contract = new Contract(PERP_CONTRACT_ADDRESS, PERP_ABI, signer);
+  const nonce = await signer.getNonce('pending');
+
+  const txRequest = await contract
+    .getFunction('closePosition')
+    .populateTransaction(
+      walletRecord.address,
+      market.marketId,
+      parsePositiveDecimal(input.price, market.priceDecimals, 'price'),
+      normalizeSlippage(input.slippage),
+    );
+
+  const signedTx = await signer.signTransaction({
+    ...txRequest,
+    nonce,
+    chainId: network.chainId,
+    gasLimit: 1000000n,
+  });
+
+  const txHash = await submitRpcTransaction({
+    network,
+    provider,
+    signedTx,
+  });
+
+  return {
+    status: 'submitted',
+    network: network.id,
+    pair: input.pair,
+    txHash,
+    explorerUrl: `${network.explorerUrl}/tx/${txHash}`,
+    summary: `${network.shortLabel} close position on ${input.pair} @ ${input.price}`,
+  };
+}
+
+export async function updatePerpPositionLive(
+  input: UpdatePerpPositionInput,
+): Promise<{
+  status: 'submitted';
+  network: RuntimeNetwork;
+  pair: PerpPair;
+  txHash: string;
+  explorerUrl: string;
+  summary: string;
+}> {
+  if (!input.confirm) {
+    throw new Error('Live position update requires confirm=true.');
+  }
+
+  const networkId = input.network ?? 'deepx_devnet';
+  const network = getNetworkConfig(networkId);
+  const walletRecord = await readWalletRecord(networkId);
+  if (!walletRecord) {
+    throw new Error(`No local wallet found for ${networkId}.`);
+  }
+
+  const privateKey = decryptPrivateKey(walletRecord.crypto, input.passphrase);
+  const provider = new JsonRpcProvider(network.rpcUrl);
+  const signer = new Wallet(privateKey, provider);
+  const market = perpMarkets[input.pair];
+  const contract = new Contract(PERP_CONTRACT_ADDRESS, PERP_ABI, signer);
+  const nonce = await signer.getNonce('pending');
+
+  const txRequest = await contract
+    .getFunction('setProfitAndLossPoint')
+    .populateTransaction(
+      walletRecord.address,
+      market.marketId,
+      parseNonNegativeDecimal(
+        input.takeProfit,
+        market.priceDecimals,
+        'takeProfit',
+      ),
+      parseNonNegativeDecimal(input.stopLoss, market.priceDecimals, 'stopLoss'),
+    );
+
+  const signedTx = await signer.signTransaction({
+    ...txRequest,
+    nonce,
+    chainId: network.chainId,
+    gasLimit: 1000000n,
+  });
+
+  const txHash = await submitRpcTransaction({
+    network,
+    provider,
+    signedTx,
+  });
+
+  return {
+    status: 'submitted',
+    network: network.id,
+    pair: input.pair,
+    txHash,
+    explorerUrl: `${network.explorerUrl}/tx/${txHash}`,
+    summary: `${network.shortLabel} update position on ${input.pair} TP ${input.takeProfit} SL ${input.stopLoss}`,
+  };
+}
+
 export function listLivePerpPairs(): PerpPair[] {
   return Object.keys(perpMarkets) as PerpPair[];
 }
@@ -204,6 +348,23 @@ function normalizeLeverage(value?: number): number {
   }
 
   return leverage;
+}
+
+function normalizeSlippage(value?: string | number): bigint {
+  if (value == null) {
+    return 10n;
+  }
+
+  const normalized = String(value).replaceAll(',', '').trim();
+  if (
+    !normalized ||
+    Number(normalized) < 0 ||
+    !Number.isInteger(Number(normalized))
+  ) {
+    throw new Error('Invalid slippage. Expected a non-negative integer.');
+  }
+
+  return BigInt(normalized);
 }
 
 function parsePositiveDecimal(
@@ -218,6 +379,23 @@ function parsePositiveDecimal(
   const normalized = String(value).replaceAll(',', '').trim();
   if (!normalized || Number(normalized) <= 0) {
     throw new Error(`Invalid ${field}. Expected a positive number.`);
+  }
+
+  return parseUnits(normalized, decimals);
+}
+
+function parseNonNegativeDecimal(
+  value: string | number | undefined,
+  decimals: number,
+  field: string,
+): bigint {
+  if (value == null) {
+    throw new Error(`Missing ${field}.`);
+  }
+
+  const normalized = String(value).replaceAll(',', '').trim();
+  if (!normalized || Number(normalized) < 0) {
+    throw new Error(`Invalid ${field}. Expected a non-negative number.`);
   }
 
   return parseUnits(normalized, decimals);

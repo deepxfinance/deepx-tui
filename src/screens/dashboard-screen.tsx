@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { CandleChart } from '../components/chart/candle-chart';
 import { DebugPanel } from '../components/debug-panel';
+import { PositionsPanel } from '../components/positions-panel';
 import type { NetworkConfig } from '../config/networks';
 import { CLI_VERSION } from '../lib/cli-version';
 import {
@@ -36,6 +37,7 @@ import { logError, logInfo } from '../services/logger';
 import type { PairKind } from '../services/market-catalog';
 import { placeOrderTool } from '../services/order-tools';
 import { useMarketData } from '../services/use-market-data';
+import { useUserPerpPositions } from '../services/user-perp-positions';
 
 type DashboardScreenProps = {
   mode: 'default' | 'debug';
@@ -53,6 +55,7 @@ const PANEL_GAP = 0;
 const CHAT_INPUT_HEIGHT = 3;
 const TOP_BAR_HEIGHT = 6;
 const FOOTER_HEIGHT = 3;
+const BOTTOM_PANEL_HEIGHT = 8;
 const FRAME_PADDING_Y = 1;
 
 export const DashboardScreen: FC<DashboardScreenProps> = ({
@@ -93,6 +96,11 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
   });
 
   const activeOverview = overview[activePair.label];
+  const perpPositions = useUserPerpPositions({
+    network,
+    walletAddress,
+    perpPairs: pairGroups.perp,
+  });
   const activePrice =
     activeOverview?.latestPrice ?? Number(orderbook?.latestPrice ?? 0);
   const priceLabel =
@@ -294,9 +302,8 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
   const frameWidth = Math.max(process.stdout.columns ?? 120, 100);
   const frameHeight = Math.max((process.stdout.rows ?? 30) - 1, 28);
   const contentHeight = Math.max(frameHeight - FRAME_PADDING_Y * 2, 20);
-  const debugPanelHeight = mode === 'debug' ? 8 : 0;
   const middleRowHeight = Math.max(
-    contentHeight - TOP_BAR_HEIGHT - FOOTER_HEIGHT - debugPanelHeight,
+    contentHeight - TOP_BAR_HEIGHT - FOOTER_HEIGHT - BOTTOM_PANEL_HEIGHT,
     10,
   );
   const orderBookHeight = Math.max(Math.floor(middleRowHeight / 3), 8);
@@ -463,15 +470,34 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
           </Panel>
         </Box>
       </Box>
-      {mode === 'debug' ? (
-        <Box height={debugPanelHeight} marginTop={PANEL_GAP}>
-          <DebugPanel
-            filterQuery={debugFilter}
-            height={debugPanelHeight}
-            isFocused={focusTarget === 'debug'}
+      <Box height={BOTTOM_PANEL_HEIGHT} marginTop={PANEL_GAP}>
+        {mode === 'debug' ? (
+          <>
+            <Box width="48%" marginRight={PANEL_GAP}>
+              <PositionsPanel
+                height={BOTTOM_PANEL_HEIGHT}
+                overview={overview}
+                pairs={pairGroups.perp}
+                positions={perpPositions}
+              />
+            </Box>
+            <Box width="52%">
+              <DebugPanel
+                filterQuery={debugFilter}
+                height={BOTTOM_PANEL_HEIGHT}
+                isFocused={focusTarget === 'debug'}
+              />
+            </Box>
+          </>
+        ) : (
+          <PositionsPanel
+            height={BOTTOM_PANEL_HEIGHT}
+            overview={overview}
+            pairs={pairGroups.perp}
+            positions={perpPositions}
           />
-        </Box>
-      ) : null}
+        )}
+      </Box>
       <Panel borderColor="gray" height={FOOTER_HEIGHT}>
         <Box justifyContent="space-between">
           <Text color={getWebSocketDelayTone(websocketDelayMs)}>

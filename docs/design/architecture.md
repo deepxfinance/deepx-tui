@@ -11,7 +11,7 @@
 - Ink + React for terminal rendering
 - `bin/deepx` as the user-facing command entrypoint
 - per-network wallet bootstrap before dashboard entry
-- fullscreen dashboard layout with market strip, realtime chart, orderbook, trades, and AI chat
+- fullscreen dashboard layout with market strip, realtime chart, orderbook, trades, AI chat, and a lower utility row for live positions and optional debug logs
 
 ## Structure Rationale
 
@@ -31,9 +31,11 @@
 - the AI chat panel uses an in-process DeepX agent backed by the Google GenAI SDK
 - the agent exposes the existing DeepX order and market helpers as direct function tools instead of routing through MCP
 - the chat tool layer can submit live perp orders through `deepx_place_order` when the model sets `confirm=true` and a wallet passphrase is available, either explicitly or from the active unlocked session
+- the agent tool registry also exposes dedicated perp position helpers for `deepx_close_position` and `deepx_update_position`
 - AI-driven order cancellation remains blocked until a dedicated confirmation workflow exists
+- AI-driven position close and TP/SL updates remain blocked until a dedicated confirmation workflow exists
 - simple imperative trade messages such as `buy 0.001 ETH` are parsed locally in the dashboard and converted into a staged order flow before confirmation, instead of routing those trivial intents through the LLM
-- live perp `place` and `cancel` flows sign locally, then broadcast the raw transaction directly through the selected network RPC
+- live perp `place`, `cancel`, `close`, and TP/SL update flows sign locally, then broadcast the raw transaction directly through the selected network RPC
 - live execution requires the local encrypted wallet plus an explicit passphrase and confirmation flag at tool-call time
 - spot order execution remains out of scope until token approval and balance flows are ported
 
