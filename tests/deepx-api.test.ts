@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
 import { getNetworkConfig } from '../src/config/networks';
-import { resolutionToTimeFrame } from '../src/services/deepx-api';
+import {
+  candleWindowDurationMs,
+  DEFAULT_CANDLE_HISTORY_LIMIT,
+  resolutionToTimeFrame,
+} from '../src/services/deepx-api';
 import { getMarketPairs, getPairsByKind } from '../src/services/market-catalog';
 
 describe('market-catalog', () => {
@@ -28,5 +32,15 @@ describe('resolutionToTimeFrame', () => {
     expect(resolutionToTimeFrame('1D')).toBe('1d');
     expect(resolutionToTimeFrame('1W')).toBe('1w');
     expect(resolutionToTimeFrame('1M')).toBe('1M');
+  });
+
+  test('keeps a deep enough candle history window to fill the chart', () => {
+    expect(DEFAULT_CANDLE_HISTORY_LIMIT).toBe(150);
+  });
+
+  test('expands the candle fetch window to match timeframe and history depth', () => {
+    expect(candleWindowDurationMs('15m', DEFAULT_CANDLE_HISTORY_LIMIT)).toBe(
+      154 * 15 * 60_000,
+    );
   });
 });

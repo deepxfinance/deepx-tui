@@ -12,9 +12,11 @@ import {
   getVisibleChatMessages,
 } from '../lib/dashboard-chat';
 import {
+  buildCommandPaletteItems,
   buildPairPickerItems,
   formatNetworkLine,
   formatShellComposerLine,
+  isSlashCommandInput,
   moveSelectionIndex,
   parseShellInput,
   type ShellCommand,
@@ -31,6 +33,7 @@ import { logError, logInfo } from '../services/logger';
 import type { MarketPair, PairKind } from '../services/market-catalog';
 import { placeOrderTool } from '../services/order-tools';
 import { useMarketData } from '../services/use-market-data';
+import { buildHelpLines, HelpContent } from './help-screen';
 
 type DashboardScreenProps = {
   mode: 'default' | 'debug';
@@ -52,6 +55,8 @@ const DOWN_COLOR = '#FF3131';
 const CHAT_USER_COLOR = '#FFD166';
 const CHAT_ASSISTANT_COLOR = '#7FDBFF';
 const WELCOME_LOGO_COLOR = '#34FFAD';
+const COMMAND_TEXT_COLOR = 'gray';
+const COMMAND_HIGHLIGHT_COLOR = '#AAB6FF';
 export const WELCOME_LOGO_LINES = [
   { key: 'logo-1', line: '● ● ● ● ● ● · · · · ● ● ● ● ● ●' },
   { key: 'logo-2', line: '· · ● ● ● ● ● · · ● ● ● ● ● · ·' },
@@ -118,6 +123,15 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     () => buildPairPickerItems(pairOptions),
     [pairOptions],
   );
+  const commandPaletteItems = useMemo(
+    () => buildCommandPaletteItems(inputValue),
+    [inputValue],
+  );
+  const [commandPaletteIndex, setCommandPaletteIndex] = useState(0);
+  const isCommandPaletteVisible =
+    shellMode === 'chat' &&
+    isSlashCommandInput(inputValue) &&
+    commandPaletteItems.length > 0;
 
   useEffect(() => {
     if (!isChatLoading) {
@@ -131,6 +145,16 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
 
     return () => clearInterval(timer);
   }, [isChatLoading]);
+
+  useEffect(() => {
+    setCommandPaletteIndex((current) => {
+      if (commandPaletteItems.length === 0) {
+        return 0;
+      }
+
+      return Math.min(current, commandPaletteItems.length - 1);
+    });
+  }, [commandPaletteItems]);
 
   useInput((input, key) => {
     if (input === 'q' && shellMode === 'chat') {
@@ -182,6 +206,30 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       return;
     }
 
+    if (isCommandPaletteVisible) {
+      if (key.upArrow) {
+        setCommandPaletteIndex((current) =>
+          moveSelectionIndex(current, commandPaletteItems.length, -1),
+        );
+        return;
+      }
+
+      if (key.downArrow) {
+        setCommandPaletteIndex((current) =>
+          moveSelectionIndex(current, commandPaletteItems.length, 1),
+        );
+        return;
+      }
+
+      if (key.return) {
+        const selectedItem = commandPaletteItems[commandPaletteIndex];
+        if (selectedItem) {
+          submitShellCommand(selectedItem.command);
+        }
+        return;
+      }
+    }
+
     if (key.return) {
       void handleSubmit();
       return;
@@ -224,27 +272,12 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       return;
     }
 
-    setInputValue('');
-
     if (parsed.kind === 'command') {
-      setChatMessages((messages) =>
-        appendChatMessage(messages, 'command', `/${parsed.command}`),
-      );
-
-      if (parsed.command === 'help') {
-        setOutputView({ kind: 'help' });
-        setChatMessages((messages) =>
-          appendChatMessage(messages, 'command', '└ Help shown in workspace'),
-        );
-        return;
-      }
-
-      setPendingCommand(parsed.command);
-      setPairPickerIndex(0);
-      setShellMode('pair-select');
+      submitShellCommand(parsed.command);
       return;
     }
 
+    setInputValue('');
     const content = parsed.message;
     const nextMessages = appendChatMessage(chatMessages, 'user', content);
     setChatMessages(nextMessages);
@@ -331,6 +364,26 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     setPairIndex(nextPairIndex >= 0 ? nextPairIndex : 0);
   }
 
+  function submitShellCommand(command: ShellCommand) {
+    setInputValue('');
+    setCommandPaletteIndex(0);
+    setChatMessages((messages) =>
+      appendChatMessage(messages, 'command', `/${command}`),
+    );
+
+    if (command === 'help') {
+      setOutputView({ kind: 'help' });
+      setChatMessages((messages) =>
+        appendChatMessage(messages, 'command', '└ Help shown in workspace'),
+      );
+      return;
+    }
+
+    setPendingCommand(command);
+    setPairPickerIndex(0);
+    setShellMode('pair-select');
+  }
+
   const frameWidth = Math.max(process.stdout.columns ?? 120, 100);
 
   return (
@@ -351,7 +404,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
                 message.role === 'assistant'
                   ? CHAT_ASSISTANT_COLOR
                   : message.role === 'command'
-                    ? 'gray'
+                    ? COMMAND_TEXT_COLOR
                     : CHAT_USER_COLOR
               }
             >
@@ -360,7 +413,9 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
                 : message.role === 'command'
                   ? ''
                   : 'You> '}
-              {message.content}
+              {message.role === 'command'
+                ? renderCommandMessage(message.content)
+                : message.content}
             </Text>
           ))}
           {isChatLoading ? (
@@ -389,8 +444,15 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
             selectedIndex={pairPickerIndex}
           />
         </Section>
+      ) : isCommandPaletteVisible ? (
+        <Section title="Commands">
+          <CommandPalette
+            items={commandPaletteItems}
+            selectedIndex={commandPaletteIndex}
+          />
+        </Section>
       ) : outputView.kind !== 'empty' ? (
-        <Section title="Workspace">
+        <Box marginBottom={1}>
           {renderOutputView({
             outputView,
             activePair,
@@ -403,10 +465,10 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
             orderbookError,
             resolution,
             resolutionLabel,
-            width: frameWidth - 6,
-            height: 16,
+            width: frameWidth - 2,
+            height: 22,
           })}
-        </Section>
+        </Box>
       ) : null}
 
       <InputSection>{formatShellComposerLine(inputValue, true)}</InputSection>
@@ -542,6 +604,28 @@ const PairPicker: FC<PairPickerProps> = ({ command, items, selectedIndex }) => {
   );
 };
 
+type CommandPaletteProps = {
+  items: Array<{ label: string; description: string }>;
+  selectedIndex: number;
+};
+
+const CommandPalette: FC<CommandPaletteProps> = ({ items, selectedIndex }) => {
+  return (
+    <Box flexDirection="column">
+      {items.map((item, index) => (
+        <Text
+          key={item.label}
+          color={index === selectedIndex ? '#AAB6FF' : 'gray'}
+          bold={index === selectedIndex}
+        >
+          {`${index === selectedIndex ? '>' : ' '} ${item.label.padEnd(12)} ${item.description}`}
+        </Text>
+      ))}
+      <Text color="gray">Up/Down move. Enter confirms. Esc clears.</Text>
+    </Box>
+  );
+};
+
 function renderOutputView(input: {
   outputView: OutputView;
   activePair: MarketPair;
@@ -561,18 +645,7 @@ function renderOutputView(input: {
   height: number;
 }) {
   if (input.outputView.kind === 'help') {
-    return (
-      <Box flexDirection="column">
-        <Text color="gray">
-          /candle picks a pair, then renders the live candle chart.
-        </Text>
-        <Text color="gray">
-          /orderbook picks a pair, then renders sell and buy ladders.
-        </Text>
-        <Text color="gray">/help shows this command summary.</Text>
-        <Text color="gray">Plain text goes to the AI trading assistant.</Text>
-      </Box>
-    );
+    return <HelpContent lines={buildHelpLines('deepx')} />;
   }
 
   if (input.outputView.kind === 'orderbook') {
@@ -625,4 +698,29 @@ function rotateResolution(current: string, direction: -1 | 1) {
   const nextIndex =
     (currentIndex + direction + resolutions.length) % resolutions.length;
   return resolutions[nextIndex] ?? '15';
+}
+
+export function getCommandMessageSegments(content: string) {
+  if (!content.startsWith('/')) {
+    return [{ text: content, color: COMMAND_TEXT_COLOR }];
+  }
+
+  const firstSpaceIndex = content.indexOf(' ');
+  const commandToken =
+    firstSpaceIndex >= 0 ? content.slice(0, firstSpaceIndex) : content;
+  const remainder = firstSpaceIndex >= 0 ? content.slice(firstSpaceIndex) : '';
+
+  return [
+    { text: '/', color: COMMAND_TEXT_COLOR },
+    { text: commandToken.slice(1), color: COMMAND_HIGHLIGHT_COLOR },
+    ...(remainder ? [{ text: remainder, color: COMMAND_TEXT_COLOR }] : []),
+  ];
+}
+
+function renderCommandMessage(content: string) {
+  return getCommandMessageSegments(content).map((segment) => (
+    <Text key={`${segment.color}-${segment.text}`} color={segment.color}>
+      {segment.text}
+    </Text>
+  ));
 }

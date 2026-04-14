@@ -5,6 +5,8 @@ import { padRight } from '../lib/format';
 
 const SELL_COLOR = '#FF3131';
 const BUY_COLOR = '#28DE9C';
+const MID_HIGHLIGHT_COLOR = '#F0C36A';
+export const DEFAULT_ORDERBOOK_DEPTH = 20;
 
 type OrderBookLevel = {
   price: string;
@@ -30,7 +32,7 @@ export const OrderbookPanel: FC<OrderbookPanelProps> = ({
   orderbook,
   isConnected,
   errorMessage,
-  depth = 8,
+  depth = DEFAULT_ORDERBOOK_DEPTH,
 }) => {
   const rows = buildOrderBookColumns(orderbook, depth);
 
@@ -44,27 +46,39 @@ export const OrderbookPanel: FC<OrderbookPanelProps> = ({
       width="100%"
       flexGrow={1}
     >
-      <Text color="gray">{`Orderbook ${pairLabel}`}</Text>
       <Box justifyContent="space-between">
-        <Text color={SELL_COLOR}>SELL</Text>
-        <Text backgroundColor="gray" color="black">
+        <Text color="gray">{`Orderbook ${pairLabel}`}</Text>
+        <Text backgroundColor={MID_HIGHLIGHT_COLOR} color="black" bold>
           {` MID ${latestPrice} `}
         </Text>
-        <Text color={BUY_COLOR}>BUY</Text>
+      </Box>
+      <Box>
+        <Box width="50%" marginRight={1}>
+          <Text color={SELL_COLOR}>SELL</Text>
+        </Box>
+        <Box width="50%">
+          <Text color={BUY_COLOR}>BUY</Text>
+        </Box>
       </Box>
       <Box>
         <Box flexDirection="column" width="50%" marginRight={1}>
           <Text color="gray">PRICE SIZE TOTAL</Text>
-          {rows.asks.map((row) => (
-            <Text key={`ask-${row}`} color={row ? SELL_COLOR : 'gray'}>
+          {rows.asks.map((row, index) => (
+            <Text
+              key={buildOrderBookRowKey('ask', index)}
+              color={row ? SELL_COLOR : 'gray'}
+            >
               {row || ' '}
             </Text>
           ))}
         </Box>
         <Box flexDirection="column" width="50%">
           <Text color="gray">PRICE SIZE TOTAL</Text>
-          {rows.bids.map((row) => (
-            <Text key={`bid-${row}`} color={row ? BUY_COLOR : 'gray'}>
+          {rows.bids.map((row, index) => (
+            <Text
+              key={buildOrderBookRowKey('bid', index)}
+              color={row ? BUY_COLOR : 'gray'}
+            >
               {row || ' '}
             </Text>
           ))}
@@ -109,6 +123,10 @@ export function buildOrderBookColumns(
       'start',
     ),
   };
+}
+
+export function buildOrderBookRowKey(side: 'ask' | 'bid', index: number) {
+  return `${side}-${index}`;
 }
 
 function padRows(rows: string[], depth: number, align: 'start' | 'end') {

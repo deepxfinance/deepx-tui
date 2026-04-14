@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  buildCommandPaletteItems,
   buildPairPickerItems,
   formatHistoryLine,
   formatNetworkLine,
   formatShellComposerLine,
+  isSlashCommandInput,
   moveSelectionIndex,
   parseShellInput,
 } from '../src/lib/dashboard-input';
@@ -36,6 +38,24 @@ describe('dashboard input helpers', () => {
     expect(formatShellComposerLine('', true)).toBe(
       '> █ Type a message or use /candle, /orderbook, /help',
     );
+  });
+
+  test('detects live slash-command input for palette mode', () => {
+    expect(isSlashCommandInput('/')).toBe(true);
+    expect(isSlashCommandInput('  /ord')).toBe(true);
+    expect(isSlashCommandInput('buy eth')).toBe(false);
+  });
+
+  test('builds a filtered slash-command palette', () => {
+    expect(buildCommandPaletteItems('/').map((item) => item.label)).toEqual([
+      '/candle',
+      '/orderbook',
+      '/help',
+    ]);
+    expect(buildCommandPaletteItems('/ord').map((item) => item.label)).toEqual([
+      '/orderbook',
+    ]);
+    expect(buildCommandPaletteItems('/unknown')).toEqual([]);
   });
 
   test('renders recent history entries above the input', () => {

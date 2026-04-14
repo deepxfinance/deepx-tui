@@ -3,6 +3,8 @@ import { normalizeUnixTimestamp } from '../lib/time';
 import { logError, logNetworkRequest, logNetworkResponse } from './logger';
 import type { MarketPair } from './market-catalog';
 
+export const DEFAULT_CANDLE_HISTORY_LIMIT = 150;
+
 export type CandleBar = {
   time: number;
   open: number;
@@ -37,8 +39,9 @@ export async function fetchCandles(input: {
   timeFrame: string;
   limit?: number;
 }): Promise<CandleBar[]> {
+  const limit = input.limit ?? DEFAULT_CANDLE_HISTORY_LIMIT;
   const end = Date.now();
-  const start = end - 24 * 60 * 60 * 1000;
+  const start = end - candleWindowDurationMs(input.timeFrame, limit);
   const searchParams = new URLSearchParams({
     start: String(start),
     end: String(end),
@@ -74,7 +77,7 @@ export async function fetchCandles(input: {
     volume: Number(bar.volume),
   }));
 
-  return bars.reverse().slice(-(input.limit ?? 28));
+  return bars.reverse().slice(-limit);
 }
 
 export async function fetchJson<T>(
@@ -136,5 +139,39 @@ export function resolutionToTimeFrame(resolution: string): string {
       return '1M';
     default:
       return '5m';
+  }
+}
+
+export function candleWindowDurationMs(
+  timeFrame: string,
+  limit: number,
+): number {
+  const interval = timeFrameToMilliseconds(timeFrame);
+  const bufferedLimit = Math.max(limit + 4, 1);
+  return interval * bufferedLimit;
+}
+
+function timeFrameToMilliseconds(timeFrame: string): number {
+  switch (timeFrame) {
+    case '1m':
+      return 60_000;
+    case '5m':
+      return 5 * 60_000;
+    case '15m':
+      return 15 * 60_000;
+    case '30m':
+      return 30 * 60_000;
+    case '1h':
+      return 60 * 60_000;
+    case '4h':
+      return 4 * 60 * 60_000;
+    case '1d':
+      return 24 * 60 * 60_000;
+    case '1w':
+      return 7 * 24 * 60 * 60_000;
+    case '1M':
+      return 30 * 24 * 60 * 60_000;
+    default:
+      return 5 * 60_000;
   }
 }

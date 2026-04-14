@@ -7,6 +7,7 @@ import {
 } from '../lib/time';
 import {
   type CandleBar,
+  DEFAULT_CANDLE_HISTORY_LIMIT,
   fetchCandles,
   resolutionToTimeFrame,
 } from './deepx-api';
@@ -251,7 +252,7 @@ export function useMarketData(input: {
           network: input.network,
           pair: activePair,
           timeFrame: resolutionToTimeFrame(input.resolution),
-          limit: 28,
+          limit: DEFAULT_CANDLE_HISTORY_LIMIT,
         });
         if (!isCancelled) {
           setCandles(nextBars);
@@ -551,7 +552,7 @@ function mergeCandles(current: CandleBar[], incoming: CandleBar): CandleBar[] {
 
   next.push(incoming);
   next.sort((left, right) => left.time - right.time);
-  return next.slice(-28);
+  return next.slice(-DEFAULT_CANDLE_HISTORY_LIMIT);
 }
 
 function mergeLivePriceIntoCandles(

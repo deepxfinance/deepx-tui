@@ -41,16 +41,19 @@ Set `GEMINI_API_KEY` or `GOOGLE_API_KEY` before launch if you want live AI chat 
 - the dashboard shows open perp positions for the unlocked wallet in a dedicated lower panel
 - when the debug panel is focused, type to search logs by scope, level, message, or details; `Backspace` edits and `Esc` clears the filter
 - no MCP server is required for the dashboard chat flow
+- typing `/` in the shell input opens a live command selector and filters matching slash commands as you type
 
 ## Shell Keys
 
 - `q` quit
 - type into the bottom input bar for chat or slash commands
+- typing `/` opens the command selector immediately
 - `/candle`, `/orderbook`, and `/help` are the supported commands
 - `enter` submits input or confirms the selected pair
 - `backspace` edits the input bar
-- `esc` skips wallet boot or exits pair selection back to the input bar
+- `esc` skips wallet boot, clears the slash selector, or exits pair selection back to the input bar
 - `up` and `down` move through the pair picker after `/candle` or `/orderbook`
+- `up` and `down` also move through the slash-command selector while it is open
 - `[` and `]` change chart resolution while candle view is active
 
 ## Current Shell Surface

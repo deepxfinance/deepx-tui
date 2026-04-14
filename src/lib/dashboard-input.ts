@@ -6,6 +6,12 @@ export type ParsedShellInput =
   | { kind: 'chat'; message: string }
   | { kind: 'command'; command: ShellCommand };
 
+export type CommandPaletteItem = {
+  command: ShellCommand;
+  label: string;
+  description: string;
+};
+
 export type PairPickerItem = {
   label: string;
   description: string;
@@ -13,6 +19,23 @@ export type PairPickerItem = {
 
 const CHAT_PLACEHOLDER = 'Type a message or use /candle, /orderbook, /help';
 const HISTORY_PLACEHOLDER = 'No history yet.';
+const COMMAND_PALETTE_ITEMS: CommandPaletteItem[] = [
+  {
+    command: 'candle',
+    label: '/candle',
+    description: 'Open the live candle chart workspace',
+  },
+  {
+    command: 'orderbook',
+    label: '/orderbook',
+    description: 'Open the live orderbook ladder workspace',
+  },
+  {
+    command: 'help',
+    label: '/help',
+    description: 'Show the command summary in the workspace',
+  },
+];
 
 export function parseShellInput(input: string): ParsedShellInput | undefined {
   const trimmed = input.trim();
@@ -54,6 +77,28 @@ export function formatShellComposerLine(
   }
 
   return isFocused ? `> ${input}█` : `> ${input}`;
+}
+
+export function isSlashCommandInput(input: string) {
+  return input.trimStart().startsWith('/');
+}
+
+export function buildCommandPaletteItems(input: string): CommandPaletteItem[] {
+  if (!isSlashCommandInput(input)) {
+    return [];
+  }
+
+  const normalizedQuery = input.trimStart().slice(1).trim().toLowerCase();
+
+  if (!normalizedQuery) {
+    return COMMAND_PALETTE_ITEMS;
+  }
+
+  return COMMAND_PALETTE_ITEMS.filter(
+    (item) =>
+      item.command.includes(normalizedQuery) ||
+      item.description.toLowerCase().includes(normalizedQuery),
+  );
 }
 
 export function formatHistoryLine(entries: string[], maxItems = 3): string {

@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
-import { buildOrderBookColumns } from '../src/components/orderbook-panel';
+import {
+  buildOrderBookColumns,
+  buildOrderBookRowKey,
+  DEFAULT_ORDERBOOK_DEPTH,
+} from '../src/components/orderbook-panel';
 
 describe('orderbook panel', () => {
   test('builds sell-left and buy-right columns from orderbook levels', () => {
@@ -33,5 +37,23 @@ describe('orderbook panel', () => {
 
     expect(columns.asks).toEqual(['', 'Waiting for asks...']);
     expect(columns.bids).toEqual(['Waiting for bids...', '']);
+  });
+
+  test('builds unique row keys from side and index', () => {
+    expect([
+      buildOrderBookRowKey('ask', 0),
+      buildOrderBookRowKey('ask', 1),
+      buildOrderBookRowKey('bid', 0),
+    ]).toEqual(['ask-0', 'ask-1', 'bid-0']);
+  });
+
+  test('defaults the orderbook depth to 20 rows per side', () => {
+    expect(DEFAULT_ORDERBOOK_DEPTH).toBe(20);
+    expect(
+      buildOrderBookColumns(null, DEFAULT_ORDERBOOK_DEPTH).asks,
+    ).toHaveLength(20);
+    expect(
+      buildOrderBookColumns(null, DEFAULT_ORDERBOOK_DEPTH).bids,
+    ).toHaveLength(20);
   });
 });

@@ -26,13 +26,17 @@ export function buildChartModel(
   candles: ChartCandle[],
   options: RenderOptions,
 ): ChartModel {
-  const plotMetrics = resolvePlotMetrics(options.width);
-  const plotColumns = new Set(plotMetrics.columns);
+  const priceAxisWidth = options.priceAxisWidth ?? 9;
+  const plotWidth = Math.max(options.width - priceAxisWidth - 1, 1);
+  const plotMetrics = resolvePlotMetrics(plotWidth);
   const visibleCandles = candles.slice(-plotMetrics.visibleCapacity);
+  const activeColumns = plotMetrics.columns.slice(
+    Math.max(plotMetrics.columns.length - visibleCandles.length, 0),
+  );
+  const plotColumns = new Set(activeColumns);
   const volumeHeight = options.volumeHeight ?? 4;
   const candleHeight = Math.max(options.height - volumeHeight, 4);
   const scale = createPriceScale(visibleCandles, candleHeight);
-  const priceAxisWidth = options.priceAxisWidth ?? 9;
   const gridRows = new Set([
     0,
     Math.floor((candleHeight - 1) * 0.33),
@@ -43,7 +47,7 @@ export function buildChartModel(
   const lastPriceRow = scale.rowForPrice(lastPrice);
   const matrix = Array.from({ length: candleHeight }, (_, y) =>
     Array.from(
-      { length: options.width },
+      { length: plotWidth },
       (_, _x): Cell => ({
         char: gridRows.has(y) && plotColumns.has(_x) ? '┈' : ' ',
         color:
@@ -54,7 +58,7 @@ export function buildChartModel(
   );
 
   for (const [index, candle] of visibleCandles.entries()) {
-    const x = plotMetrics.columns[index];
+    const x = activeColumns[index];
     if (x == null) {
       continue;
     }
@@ -84,8 +88,8 @@ export function buildChartModel(
     }
   }
 
-  const lastColumn = plotMetrics.columns[plotMetrics.columns.length - 1];
-  for (const x of plotMetrics.columns) {
+  const lastColumn = activeColumns[activeColumns.length - 1];
+  for (const x of activeColumns) {
     paintCell(
       matrix,
       x,
@@ -97,14 +101,14 @@ export function buildChartModel(
   }
 
   const rows = matrix.map((cells, y) => {
-    const axisLabel = formatPrice(scale.priceForRow(y)).padStart(
-      priceAxisWidth,
-      ' ',
-    );
+    const isLastPriceRow = y === lastPriceRow;
+    const axisLabel = formatPrice(
+      isLastPriceRow ? lastPrice : scale.priceForRow(y),
+    ).padStart(priceAxisWidth, ' ');
     const segments = compressCells(cells, `row-${y}`).concat({
       key: `axis-${y}`,
       text: ` ${axisLabel}`,
-      color: chartTheme.axis,
+      color: isLastPriceRow ? chartTheme.priceLine : chartTheme.axis,
     });
 
     return {
@@ -117,16 +121,17 @@ export function buildChartModel(
     rows,
     volumeRows: buildVolumeRows(
       visibleCandles,
-      options.width,
+      plotWidth,
       volumeHeight,
       priceAxisWidth,
-      plotMetrics.columns,
+      activeColumns,
     ),
     timeAxis: buildTimeAxis(
       visibleCandles,
-      options.width,
+      plotWidth,
       priceAxisWidth,
       options.resolution ?? '15',
+      activeColumns,
     ),
     minPrice: scale.min,
     maxPrice: scale.max,
@@ -203,20 +208,26 @@ function buildTimeAxis(
   width: number,
   priceAxisWidth: number,
   resolution: string,
+  columns: number[],
 ): ChartRow {
   const axis = Array.from({ length: width }, () => ' ');
   const checkpoints = resolveTimeAxisCheckpoints(candles, width, resolution);
+  const lastCheckpoint = checkpoints[checkpoints.length - 1];
 
-  for (const [checkpointIndex, checkpoint] of checkpoints.entries()) {
+  if (lastCheckpoint) {
+    placeAxisLabel(
+      axis,
+      lastCheckpoint.label,
+      Math.max(width - lastCheckpoint.label.length, 0),
+    );
+  }
+
+  for (const checkpoint of checkpoints.slice(0, -1)) {
+    const column = columns[Math.min(checkpoint.index, columns.length - 1)] ?? 0;
     placeAxisLabel(
       axis,
       checkpoint.label,
-      resolveAxisLabelStart(
-        width,
-        checkpoint.label.length,
-        checkpointIndex,
-        checkpoints.length,
-      ),
+      resolveAxisLabelStart(width, checkpoint.label.length, column),
     );
   }
 
@@ -240,13 +251,13 @@ function resolvePlotMetrics(width: number): {
   columns: number[];
   visibleCapacity: number;
 } {
-  const gap = width >= 8 ? 1 : 0;
+  const gap = width >= 24 ? 1 : 0;
   const step = gap + 1;
   const visibleCapacity = Math.max(Math.floor((width + gap) / step), 1);
-  const columns = Array.from(
-    { length: visibleCapacity },
-    (_, index) => index * step,
-  ).filter((column) => column < width);
+  const offset = Math.max(width - (visibleCapacity - 1) * step - 1, 0);
+  const columns = Array.from({ length: visibleCapacity }, (_, index) => {
+    return offset + index * step;
+  }).filter((column) => column < width);
 
   return {
     columns,
@@ -292,15 +303,10 @@ function resolveTimeAxisCheckpoints(
 function resolveAxisLabelStart(
   width: number,
   labelLength: number,
-  index: number,
-  count: number,
+  column: number,
 ): number {
   const maxStart = Math.max(width - labelLength, 0);
-  if (count <= 1) {
-    return 0;
-  }
-
-  return Math.round((index * maxStart) / (count - 1));
+  return Math.max(0, Math.min(column - Math.floor(labelLength / 2), maxStart));
 }
 
 function placeAxisLabel(axis: string[], label: string, start: number) {

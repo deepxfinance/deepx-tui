@@ -1,8 +1,53 @@
 import { Box, Text, useApp, useInput } from 'ink';
-import type { FC } from 'react';
+import type { FC, ReactNode } from 'react';
 
 type HelpScreenProps = {
   commandName: string;
+};
+
+export function buildHelpLines(commandName: string): string[] {
+  return [
+    `Usage: ${commandName} [--network devnet|testnet] [--mode default|debug]`,
+    '',
+    'Phase 1 behavior:',
+    '- defaults to devnet',
+    '- optional debug mode shows a live internal log panel',
+    '- checks for a local encrypted wallet',
+    '- prompts for passphrase if a wallet already exists',
+    '- prompts for a simple private key import if missing',
+    '- opens the fullscreen market dashboard',
+    '',
+    'Workspace commands:',
+    '- /candle: open the live candle chart for a selected pair',
+    '- /orderbook: open the live orderbook ladder for a selected pair',
+    '- /help: show this help summary inside the dashboard',
+    '',
+    'Keys:',
+    '- q or Esc: quit',
+    '- [ / ]: change chart resolution while candle view is open',
+    '- Up / Down: move through slash-command and pair menus',
+    '- Enter: confirm the active command, pair, or chat input',
+  ];
+}
+
+export const HelpContent: FC<{ lines: string[]; footer?: ReactNode }> = ({
+  lines,
+  footer,
+}) => {
+  const seenLines = new Map<string, number>();
+
+  return (
+    <Box flexDirection="column">
+      {lines.map((line) => {
+        const occurrence = seenLines.get(line) ?? 0;
+        seenLines.set(line, occurrence + 1);
+        const key = `help-line-${line || 'blank'}-${occurrence}`;
+
+        return line ? <Text key={key}>{line}</Text> : <Text key={key}> </Text>;
+      })}
+      {footer ?? null}
+    </Box>
+  );
 };
 
 export const HelpScreen: FC<HelpScreenProps> = ({ commandName }) => {
@@ -23,26 +68,15 @@ export const HelpScreen: FC<HelpScreenProps> = ({ commandName }) => {
       width={76}
     >
       <Text color="yellow">DeepX Terminal</Text>
-      <Text>
-        Usage: {commandName} [--network devnet|testnet] [--mode default|debug]
-      </Text>
-      <Text> </Text>
-      <Text>Phase 1 behavior:</Text>
-      <Text>- defaults to devnet</Text>
-      <Text>- optional debug mode shows a live internal log panel</Text>
-      <Text>- checks for a local encrypted wallet</Text>
-      <Text>- prompts for passphrase if a wallet already exists</Text>
-      <Text>- prompts for a simple private key import if missing</Text>
-      <Text>- opens the fullscreen market dashboard</Text>
-      <Text> </Text>
-      <Text>Keys:</Text>
-      <Text>- q or Esc: quit</Text>
-      <Text>- Tab: cycle dashboard focus</Text>
-      <Text>- 1 / 2: switch perp / spot group</Text>
-      <Text>- Left / Right: change pair when the pair strip is focused</Text>
-      <Text>- [ / ]: change chart resolution when the chart is focused</Text>
-      <Text> </Text>
-      <Text color="gray">Press q or Esc to close this help screen.</Text>
+      <HelpContent
+        lines={buildHelpLines(commandName)}
+        footer={
+          <>
+            <Text> </Text>
+            <Text color="gray">Press q or Esc to close this help screen.</Text>
+          </>
+        }
+      />
     </Box>
   );
 };

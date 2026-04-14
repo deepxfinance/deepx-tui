@@ -64,6 +64,7 @@ Direct entrypoint:
 - wallet storage is local and per-network
 - successful unlock keeps the wallet passphrase in process memory for the active session
 - the app opens into a chat-first fullscreen shell with a welcome panel, AI transcript, slash commands, pair picker, bottom input bar, and persistent network line
+- typing `/` in the input bar opens a live command selector so slash commands can be picked with the keyboard before submission
 - `/candle` and `/orderbook` select a pair first, then render the requested market view in the workspace area
 - sensitive values such as `privateKey`, `passphrase`, and `signedTx` are redacted before entering logs
 
@@ -91,6 +92,7 @@ Direct entrypoint:
 
 - `q` quit
 - type into the bottom input bar for chat or slash commands
+- typing `/` opens the command selector and filters commands as you keep typing
 - `/candle`, `/orderbook`, and `/help` are the supported commands
 - `enter` submits input or confirms the selected pair
 - `backspace` edits the input bar
