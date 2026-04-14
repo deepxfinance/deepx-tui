@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { CandleChart } from '../components/chart/candle-chart';
 import { OrderbookPanel } from '../components/orderbook-panel';
+import { ShellInput } from '../components/shell-input';
 import type { NetworkConfig } from '../config/networks';
 import {
   appendChatMessage,
@@ -15,8 +16,6 @@ import {
   buildPairPickerItems,
   formatHistoryLine,
   formatNetworkLine,
-  formatShellComposerLine,
-  getHistoryValue,
   moveSelectionIndex,
   parseShellInput,
   type ShellCommand,
@@ -72,10 +71,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
   const [pairKind, setPairKind] = useState<PairKind>('perp');
   const [pairIndex, setPairIndex] = useState(0);
   const [resolution, setResolution] = useState('15');
-  const [inputValue, setInputValue] = useState('');
   const [inputHistory, setInputHistory] = useState<string[]>([]);
-  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
-  const [draftValue, setDraftValue] = useState('');
   const [shellMode, setShellMode] = useState<ShellMode>('chat');
   const [pairPickerIndex, setPairPickerIndex] = useState(0);
   const [pendingCommand, setPendingCommand] = useState<
@@ -187,54 +183,6 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       return;
     }
 
-    if (key.upArrow) {
-      if (inputHistory.length > 0) {
-        const { nextIndex, nextValue } = getHistoryValue(
-          inputHistory,
-          historyIndex,
-          'up',
-          historyIndex === null ? inputValue : draftValue,
-        );
-        if (historyIndex === null) {
-          setDraftValue(inputValue);
-        }
-        setHistoryIndex(nextIndex);
-        setInputValue(nextValue);
-      }
-      return;
-    }
-
-    if (key.downArrow) {
-      if (inputHistory.length > 0) {
-        const { nextIndex, nextValue } = getHistoryValue(
-          inputHistory,
-          historyIndex,
-          'down',
-          draftValue,
-        );
-        setHistoryIndex(nextIndex);
-        setInputValue(nextValue);
-      }
-      return;
-    }
-
-    if (key.return) {
-      void handleSubmit();
-      return;
-    }
-
-    if (key.backspace || key.delete) {
-      setInputValue((value) => value.slice(0, -1));
-      return;
-    }
-
-    if (key.escape) {
-      setInputValue('');
-      setHistoryIndex(null);
-      setDraftValue('');
-      return;
-    }
-
     if (input === '[' && outputView.kind === 'candle') {
       setResolution((value) => rotateResolution(value, -1));
       return;
@@ -244,34 +192,23 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       setResolution((value) => rotateResolution(value, 1));
       return;
     }
-
-    if (!key.ctrl && !key.meta && input.length > 0) {
-      if (
-        inputValue.length === 0 &&
-        (outputView.kind === 'candle' || outputView.kind === 'orderbook')
-      ) {
-        setOutputView({ kind: 'empty' });
-      }
-      setInputValue((value) => `${value}${input}`);
-    }
   });
 
-  async function handleSubmit() {
-    const parsed = parseShellInput(inputValue);
+  async function handleSubmit(value: string) {
+    const parsed = parseShellInput(value);
     if (!parsed || isChatLoading) {
       return;
     }
 
-    const trimmedInput = inputValue.trim();
-    setInputHistory((current) => {
-      if (current[current.length - 1] === trimmedInput) {
-        return current;
-      }
-      return [...current, trimmedInput];
-    });
-    setHistoryIndex(null);
-    setDraftValue('');
-    setInputValue('');
+    const trimmedInput = value.trim();
+    if (trimmedInput) {
+      setInputHistory((current) => {
+        if (current[current.length - 1] === trimmedInput) {
+          return current;
+        }
+        return [...current, trimmedInput];
+      });
+    }
 
     if (parsed.kind === 'command') {
       setChatMessages((messages) =>
@@ -369,6 +306,12 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     }
   }
 
+  function handleInputChange(value: string) {
+    if (value.length > 0 && outputView.kind !== 'empty') {
+      setOutputView({ kind: 'empty' });
+    }
+  }
+
   function activatePair(nextPair: MarketPair) {
     const nextPairKind = nextPair.kind;
     const nextPairIndex = pairGroups[nextPairKind].findIndex(
@@ -457,7 +400,14 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       ) : null}
 
       <Text color="gray">{formatHistoryLine(inputHistory)}</Text>
-      <InputSection>{formatShellComposerLine(inputValue, true)}</InputSection>
+      <InputSection>
+        <ShellInput
+          onSubmit={handleSubmit}
+          onChange={handleInputChange}
+          initialHistory={inputHistory}
+          placeholder="Type a message or use /candle, /orderbook, /help"
+        />
+      </InputSection>
       <Text color="gray">
         {formatNetworkLine({
           networkLabel: network.label,
@@ -547,7 +497,7 @@ const TranscriptSection: FC<TranscriptSectionProps> = ({ children }) => {
 };
 
 type InputSectionProps = {
-  children: string;
+  children: ReactNode;
 };
 
 const InputSection: FC<InputSectionProps> = ({ children }) => {
@@ -556,7 +506,7 @@ const InputSection: FC<InputSectionProps> = ({ children }) => {
       <Text color="gray">
         {'─'.repeat(Math.max((process.stdout.columns ?? 120) - 2, 20))}
       </Text>
-      <Text color="yellow">{children}</Text>
+      <Box>{children}</Box>
       <Text color="gray">
         {'─'.repeat(Math.max((process.stdout.columns ?? 120) - 2, 20))}
       </Text>
