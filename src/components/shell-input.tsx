@@ -1,6 +1,6 @@
 import { Box, Text, useInput } from 'ink';
 import type { FC } from 'react';
-import { useEffect, useReducer } from 'react';
+import { memo, useEffect, useMemo, useReducer, useRef } from 'react';
 import {
   getHistoryValue,
   getNextWordIndex,
@@ -134,101 +134,109 @@ function reducer(state: State, action: Action): State {
   }
 }
 
-export const ShellInput: FC<ShellInputProps> = ({
-  onSubmit,
-  onChange,
-  placeholder = 'Type a message...',
-  initialHistory = [],
-}) => {
-  const [state, dispatch] = useReducer(reducer, {
-    value: '',
-    cursor: 0,
-    history: initialHistory,
-    historyIndex: null,
-    draft: '',
-  });
+export const ShellInput: FC<ShellInputProps> = memo(
+  ({
+    onSubmit,
+    onChange,
+    placeholder = 'Type a message...',
+    initialHistory = [],
+  }) => {
+    const [state, dispatch] = useReducer(reducer, {
+      value: '',
+      cursor: 0,
+      history: initialHistory,
+      historyIndex: null,
+      draft: '',
+    });
 
-  useEffect(() => {
-    dispatch({ type: 'SYNC_HISTORY', history: initialHistory });
-  }, [initialHistory]);
+    // Track the previous value to only call onChange when it actually changes
+    const lastValueRef = useRef(state.value);
 
-  useEffect(() => {
-    if (onChange) onChange(state.value);
-  }, [state.value, onChange]);
+    useEffect(() => {
+      dispatch({ type: 'SYNC_HISTORY', history: initialHistory });
+    }, [initialHistory]);
 
-  useInput((input, key) => {
-    const isCtrl = key.ctrl || key.meta;
+    useEffect(() => {
+      if (onChange && state.value !== lastValueRef.current) {
+        onChange(state.value);
+        lastValueRef.current = state.value;
+      }
+    }, [state.value, onChange]);
 
-    // Standard high-level flags from Ink 7.0.0
-    const isBackspace =
-      key.backspace || input === '\x7f' || input === '\x08' || input === '\b';
-    const isDelete = key.delete || (isCtrl && input === 'd');
+    useInput((input, key) => {
+      const isCtrl = key.ctrl || key.meta;
 
-    if (key.upArrow) return dispatch({ type: 'MOVE_UP' });
-    if (key.downArrow) return dispatch({ type: 'MOVE_DOWN' });
+      // Standard high-level flags from Ink 7.0.0
+      const isBackspace =
+        key.backspace || input === '\x7f' || input === '\x08' || input === '\b';
+      const isDelete = key.delete || (isCtrl && input === 'd');
 
-    if ((isCtrl && input === 'a') || (key as { home?: boolean }).home)
-      return dispatch({ type: 'HOME' });
-    if ((isCtrl && input === 'e') || (key as { end?: boolean }).end)
-      return dispatch({ type: 'END' });
+      if (key.upArrow) return dispatch({ type: 'MOVE_UP' });
+      if (key.downArrow) return dispatch({ type: 'MOVE_DOWN' });
 
-    if (key.leftArrow) return dispatch({ type: 'MOVE_LEFT', isCtrl });
-    if (key.rightArrow) return dispatch({ type: 'MOVE_RIGHT', isCtrl });
+      if ((isCtrl && input === 'a') || (key as { home?: boolean }).home)
+        return dispatch({ type: 'HOME' });
+      if ((isCtrl && input === 'e') || (key as { end?: boolean }).end)
+        return dispatch({ type: 'END' });
 
-    // Simple single-character backspace only to avoid Windows Terminal byte collision bugs
-    if (isBackspace) return dispatch({ type: 'BACKSPACE' });
-    if (isDelete) return dispatch({ type: 'DELETE', isCtrl });
+      if (key.leftArrow) return dispatch({ type: 'MOVE_LEFT', isCtrl });
+      if (key.rightArrow) return dispatch({ type: 'MOVE_RIGHT', isCtrl });
 
-    if (isCtrl && input === 'u') return dispatch({ type: 'CLEAR_BEFORE' });
-    if (isCtrl && input === 'k') return dispatch({ type: 'CLEAR_AFTER' });
+      // Simple single-character backspace only to avoid Windows Terminal byte collision bugs
+      if (isBackspace) return dispatch({ type: 'BACKSPACE' });
+      if (isDelete) return dispatch({ type: 'DELETE', isCtrl });
 
-    if (key.return) {
-      onSubmit(state.value);
-      return dispatch({ type: 'RESET' });
-    }
+      if (isCtrl && input === 'u') return dispatch({ type: 'CLEAR_BEFORE' });
+      if (isCtrl && input === 'k') return dispatch({ type: 'CLEAR_AFTER' });
 
-    if (key.escape) {
-      return dispatch({ type: 'RESET' });
-    }
+      if (key.return) {
+        onSubmit(state.value);
+        return dispatch({ type: 'RESET' });
+      }
 
-    const isPrintable =
-      !isCtrl &&
-      !key.meta &&
-      !isBackspace &&
-      !isDelete &&
-      input !== '\r' &&
-      input !== '\n' &&
-      input !== '\t' &&
-      Array.from(input).every((char) => {
-        const code = char.charCodeAt(0);
-        return (code >= 32 && code <= 126) || code >= 160;
-      });
+      if (key.escape) {
+        return dispatch({ type: 'RESET' });
+      }
 
-    if (isPrintable) {
-      dispatch({ type: 'TYPE', char: input });
-    }
-  });
+      const isPrintable =
+        !isCtrl &&
+        !key.meta &&
+        !isBackspace &&
+        !isDelete &&
+        input !== '\r' &&
+        input !== '\n' &&
+        input !== '\t' &&
+        Array.from(input).every((char) => {
+          const code = char.charCodeAt(0);
+          return (code >= 32 && code <= 126) || code >= 160;
+        });
 
-  const { before, at, after } = parseShellComposerParts(
-    state.value,
-    state.cursor,
-  );
+      if (isPrintable) {
+        dispatch({ type: 'TYPE', char: input });
+      }
+    });
 
-  return (
-    <Box>
-      <Text color="yellow">{'> '}</Text>
-      {!state.value ? (
-        <Box>
-          <Text inverse> </Text>
-          <Text color="gray">{` ${placeholder}`}</Text>
-        </Box>
-      ) : (
-        <Text color="yellow">
-          <Text>{before}</Text>
-          <Text inverse>{at || ' '}</Text>
-          <Text>{after}</Text>
-        </Text>
-      )}
-    </Box>
-  );
-};
+    const { before, at, after } = useMemo(
+      () => parseShellComposerParts(state.value, state.cursor),
+      [state.value, state.cursor],
+    );
+
+    return (
+      <Box>
+        <Text color="yellow">{'> '}</Text>
+        {!state.value ? (
+          <Box>
+            <Text inverse> </Text>
+            <Text color="gray">{` ${placeholder}`}</Text>
+          </Box>
+        ) : (
+          <Text color="yellow">
+            {before}
+            <Text inverse>{at || ' '}</Text>
+            {after}
+          </Text>
+        )}
+      </Box>
+    );
+  },
+);
