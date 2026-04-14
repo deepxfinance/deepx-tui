@@ -68,6 +68,46 @@ export function formatHistoryLine(entries: string[], maxItems = 3): string {
   return `History: ${visibleEntries.join('  |  ')}`;
 }
 
+export function getHistoryValue(
+  history: string[],
+  currentIndex: number | null,
+  direction: 'up' | 'down',
+  draftValue: string,
+): { nextIndex: number | null; nextValue: string } {
+  if (history.length === 0) {
+    return { nextIndex: null, nextValue: draftValue };
+  }
+
+  if (direction === 'up') {
+    if (currentIndex === null) {
+      return {
+        nextIndex: history.length - 1,
+        nextValue: history[history.length - 1] ?? draftValue,
+      };
+    }
+    if (currentIndex > 0) {
+      const nextIndex = currentIndex - 1;
+      return {
+        nextIndex,
+        nextValue: history[nextIndex] ?? draftValue,
+      };
+    }
+    return { nextIndex: 0, nextValue: history[0] ?? draftValue };
+  }
+
+  if (currentIndex === null) {
+    return { nextIndex: null, nextValue: draftValue };
+  }
+  if (currentIndex < history.length - 1) {
+    const nextIndex = currentIndex + 1;
+    return {
+      nextIndex,
+      nextValue: history[nextIndex] ?? draftValue,
+    };
+  }
+  return { nextIndex: null, nextValue: draftValue };
+}
+
 export function formatNetworkLine(input: {
   networkLabel: string;
   walletAddress?: string;

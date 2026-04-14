@@ -13,8 +13,10 @@ import {
 } from '../lib/dashboard-chat';
 import {
   buildPairPickerItems,
+  formatHistoryLine,
   formatNetworkLine,
   formatShellComposerLine,
+  getHistoryValue,
   moveSelectionIndex,
   parseShellInput,
   type ShellCommand,
@@ -71,6 +73,9 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
   const [pairIndex, setPairIndex] = useState(0);
   const [resolution, setResolution] = useState('15');
   const [inputValue, setInputValue] = useState('');
+  const [inputHistory, setInputHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+  const [draftValue, setDraftValue] = useState('');
   const [shellMode, setShellMode] = useState<ShellMode>('chat');
   const [pairPickerIndex, setPairPickerIndex] = useState(0);
   const [pendingCommand, setPendingCommand] = useState<
@@ -182,6 +187,37 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       return;
     }
 
+    if (key.upArrow) {
+      if (inputHistory.length > 0) {
+        const { nextIndex, nextValue } = getHistoryValue(
+          inputHistory,
+          historyIndex,
+          'up',
+          historyIndex === null ? inputValue : draftValue,
+        );
+        if (historyIndex === null) {
+          setDraftValue(inputValue);
+        }
+        setHistoryIndex(nextIndex);
+        setInputValue(nextValue);
+      }
+      return;
+    }
+
+    if (key.downArrow) {
+      if (inputHistory.length > 0) {
+        const { nextIndex, nextValue } = getHistoryValue(
+          inputHistory,
+          historyIndex,
+          'down',
+          draftValue,
+        );
+        setHistoryIndex(nextIndex);
+        setInputValue(nextValue);
+      }
+      return;
+    }
+
     if (key.return) {
       void handleSubmit();
       return;
@@ -194,6 +230,8 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
 
     if (key.escape) {
       setInputValue('');
+      setHistoryIndex(null);
+      setDraftValue('');
       return;
     }
 
@@ -224,6 +262,15 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       return;
     }
 
+    const trimmedInput = inputValue.trim();
+    setInputHistory((current) => {
+      if (current[current.length - 1] === trimmedInput) {
+        return current;
+      }
+      return [...current, trimmedInput];
+    });
+    setHistoryIndex(null);
+    setDraftValue('');
     setInputValue('');
 
     if (parsed.kind === 'command') {
@@ -409,6 +456,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
         </Section>
       ) : null}
 
+      <Text color="gray">{formatHistoryLine(inputHistory)}</Text>
       <InputSection>{formatShellComposerLine(inputValue, true)}</InputSection>
       <Text color="gray">
         {formatNetworkLine({
