@@ -1,7 +1,7 @@
 import process from 'node:process';
 import { Box, Text, useApp, useInput } from 'ink';
 import type { FC, ReactNode } from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { CandleChart } from '../components/chart/candle-chart';
 import { OrderbookPanel } from '../components/orderbook-panel';
@@ -194,123 +194,139 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     }
   });
 
-  async function handleSubmit(value: string) {
-    const parsed = parseShellInput(value);
-    if (!parsed || isChatLoading) {
-      return;
-    }
-
-    const trimmedInput = value.trim();
-    if (trimmedInput) {
-      setInputHistory((current) => {
-        if (current[current.length - 1] === trimmedInput) {
-          return current;
-        }
-        return [...current, trimmedInput];
-      });
-    }
-
-    if (parsed.kind === 'command') {
-      setChatMessages((messages) =>
-        appendChatMessage(messages, 'command', `/${parsed.command}`),
-      );
-
-      if (parsed.command === 'help') {
-        setOutputView({ kind: 'help' });
-        setChatMessages((messages) =>
-          appendChatMessage(messages, 'command', '└ Help shown in workspace'),
-        );
+  const handleSubmit = useCallback(
+    async (value: string) => {
+      const parsed = parseShellInput(value);
+      if (!parsed || isChatLoading) {
         return;
       }
 
-      setPendingCommand(parsed.command);
-      setPairPickerIndex(0);
-      setShellMode('pair-select');
-      return;
-    }
-
-    const content = parsed.message;
-    const nextMessages = appendChatMessage(chatMessages, 'user', content);
-    setChatMessages(nextMessages);
-    setIsChatLoading(true);
-
-    try {
-      if (pendingChatTrade && isTradeConfirmationMessage(content)) {
-        logInfo(
-          'chat-trade',
-          'Submitting staged order',
-          `${pendingChatTrade.side} ${pendingChatTrade.size} ${pendingChatTrade.pair} ${pendingChatTrade.type}`,
-        );
-        const result = await placeOrderTool({
-          network: network.id,
-          pair: pendingChatTrade.pair,
-          side: pendingChatTrade.side,
-          type: pendingChatTrade.type,
-          size: pendingChatTrade.size,
-          price: pendingChatTrade.price,
-          confirm: true,
+      const trimmedInput = value.trim();
+      if (trimmedInput) {
+        setInputHistory((current) => {
+          if (current[current.length - 1] === trimmedInput) {
+            return current;
+          }
+          return [...current, trimmedInput];
         });
-        setPendingChatTrade(undefined);
+      }
+
+      if (parsed.kind === 'command') {
         setChatMessages((messages) =>
-          appendChatMessage(messages, 'assistant', result.summary),
+          appendChatMessage(messages, 'command', `/${parsed.command}`),
         );
+
+        if (parsed.command === 'help') {
+          setOutputView({ kind: 'help' });
+          setChatMessages((messages) =>
+            appendChatMessage(messages, 'command', '└ Help shown in workspace'),
+          );
+          return;
+        }
+
+        setPendingCommand(parsed.command);
+        setPairPickerIndex(0);
+        setShellMode('pair-select');
         return;
       }
 
-      const tradeIntent = parseChatTradeIntent({
-        message: content,
-        activePair: activePair.label,
-      });
-      if (tradeIntent) {
-        setPendingChatTrade(tradeIntent);
+      const content = parsed.message;
+      const nextMessages = appendChatMessage(chatMessages, 'user', content);
+      setChatMessages(nextMessages);
+      setIsChatLoading(true);
+
+      try {
+        if (pendingChatTrade && isTradeConfirmationMessage(content)) {
+          logInfo(
+            'chat-trade',
+            'Submitting staged order',
+            `${pendingChatTrade.side} ${pendingChatTrade.size} ${pendingChatTrade.pair} ${pendingChatTrade.type}`,
+          );
+          const result = await placeOrderTool({
+            network: network.id,
+            pair: pendingChatTrade.pair,
+            side: pendingChatTrade.side,
+            type: pendingChatTrade.type,
+            size: pendingChatTrade.size,
+            price: pendingChatTrade.price,
+            confirm: true,
+          });
+          setPendingChatTrade(undefined);
+          setChatMessages((messages) =>
+            appendChatMessage(messages, 'assistant', result.summary),
+          );
+          return;
+        }
+
+        const tradeIntent = parseChatTradeIntent({
+          message: content,
+          activePair: activePair.label,
+        });
+        if (tradeIntent) {
+          setPendingChatTrade(tradeIntent);
+          setChatMessages((messages) =>
+            appendChatMessage(
+              messages,
+              'assistant',
+              buildTradeIntentConfirmationMessage({
+                intent: tradeIntent,
+                networkLabel: network.label,
+                priceLabel,
+              }),
+            ),
+          );
+          return;
+        }
+
+        const reply = await requestAgentChat({
+          messages: nextMessages,
+          context: {
+            pairLabel: activePair.label,
+            priceLabel,
+            resolutionLabel,
+            walletUnlocked,
+          },
+        });
+        setChatMessages((messages) =>
+          appendChatMessage(messages, 'assistant', reply),
+        );
+      } catch (error) {
+        logError('shell', 'Chat submit failed', formatErrorMessage(error));
         setChatMessages((messages) =>
           appendChatMessage(
             messages,
             'assistant',
-            buildTradeIntentConfirmationMessage({
-              intent: tradeIntent,
-              networkLabel: network.label,
-              priceLabel,
-            }),
+            pendingChatTrade
+              ? `Order failed: ${formatErrorMessage(error)}`
+              : `Agent error: ${formatErrorMessage(error)}`,
           ),
         );
-        return;
+        setPendingChatTrade(undefined);
+      } finally {
+        setIsChatLoading(false);
       }
+    },
+    [
+      isChatLoading,
+      chatMessages,
+      pendingChatTrade,
+      network.id,
+      network.label,
+      activePair.label,
+      priceLabel,
+      resolutionLabel,
+      walletUnlocked,
+    ],
+  );
 
-      const reply = await requestAgentChat({
-        messages: nextMessages,
-        context: {
-          pairLabel: activePair.label,
-          priceLabel,
-          resolutionLabel,
-          walletUnlocked,
-        },
-      });
-      setChatMessages((messages) =>
-        appendChatMessage(messages, 'assistant', reply),
-      );
-    } catch (error) {
-      logError('shell', 'Chat submit failed', formatErrorMessage(error));
-      setChatMessages((messages) =>
-        appendChatMessage(
-          messages,
-          'assistant',
-          pendingChatTrade
-            ? `Order failed: ${formatErrorMessage(error)}`
-            : `Agent error: ${formatErrorMessage(error)}`,
-        ),
-      );
-      setPendingChatTrade(undefined);
-    } finally {
-      setIsChatLoading(false);
-    }
-  }
-
-  function handleInputChange(value: string) {
-    if (value.length > 0 && outputView.kind !== 'empty') {
-      setOutputView({ kind: 'empty' });
-    }
-  }
+  const handleInputChange = useCallback(
+    (value: string) => {
+      if (value.length > 0 && outputView.kind !== 'empty') {
+        setOutputView({ kind: 'empty' });
+      }
+    },
+    [outputView.kind],
+  );
 
   function activatePair(nextPair: MarketPair) {
     const nextPairKind = nextPair.kind;
@@ -500,19 +516,18 @@ type InputSectionProps = {
   children: ReactNode;
 };
 
-const InputSection: FC<InputSectionProps> = ({ children }) => {
+const InputSection: FC<InputSectionProps> = memo(({ children }) => {
+  const width = Math.max((process.stdout.columns ?? 120) - 2, 20);
+  const border = useMemo(() => '─'.repeat(width), [width]);
+
   return (
     <Box flexDirection="column">
-      <Text color="gray">
-        {'─'.repeat(Math.max((process.stdout.columns ?? 120) - 2, 20))}
-      </Text>
+      <Text color="gray">{border}</Text>
       <Box>{children}</Box>
-      <Text color="gray">
-        {'─'.repeat(Math.max((process.stdout.columns ?? 120) - 2, 20))}
-      </Text>
+      <Text color="gray">{border}</Text>
     </Box>
   );
-};
+});
 
 type PairPickerProps = {
   command: 'candle' | 'orderbook';
