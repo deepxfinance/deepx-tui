@@ -8,9 +8,9 @@ import {
   insertCharAt,
   parseShellComposerParts,
   removeCharAt,
-  removeWordBefore,
-  removeLineBefore,
   removeLineAfter,
+  removeLineBefore,
+  removeWordAfter,
 } from '../lib/dashboard-input';
 
 type ShellInputProps = {
@@ -30,8 +30,8 @@ type State = {
 
 type Action =
   | { type: 'TYPE'; char: string }
-  | { type: 'BACKSPACE'; isCtrl: boolean }
-  | { type: 'DELETE' }
+  | { type: 'BACKSPACE' }
+  | { type: 'DELETE'; isCtrl: boolean }
   | { type: 'MOVE_LEFT'; isCtrl: boolean }
   | { type: 'MOVE_RIGHT'; isCtrl: boolean }
   | { type: 'MOVE_UP' }
@@ -47,14 +47,13 @@ function reducer(state: State, action: Action): State {
   switch (action.type) {
     case 'TYPE': {
       const newValue = insertCharAt(state.value, state.cursor, action.char);
-      return { ...state, value: newValue, cursor: state.cursor + action.char.length };
+      return {
+        ...state,
+        value: newValue,
+        cursor: state.cursor + action.char.length,
+      };
     }
     case 'BACKSPACE': {
-      if (action.isCtrl) {
-        const newValue = removeWordBefore(state.value, state.cursor);
-        const diff = state.value.length - newValue.length;
-        return { ...state, value: newValue, cursor: Math.max(0, state.cursor - diff) };
-      }
       if (state.cursor > 0) {
         const newValue = removeCharAt(state.value, state.cursor, false);
         return { ...state, value: newValue, cursor: state.cursor - 1 };
@@ -62,6 +61,10 @@ function reducer(state: State, action: Action): State {
       return state;
     }
     case 'DELETE': {
+      if (action.isCtrl) {
+        const newValue = removeWordAfter(state.value, state.cursor);
+        return { ...state, value: newValue };
+      }
       const newValue = removeCharAt(state.value, state.cursor, true);
       return { ...state, value: newValue };
     }
@@ -115,7 +118,11 @@ function reducer(state: State, action: Action): State {
     case 'END':
       return { ...state, cursor: state.value.length };
     case 'CLEAR_BEFORE':
-      return { ...state, value: removeLineBefore(state.value, state.cursor), cursor: 0 };
+      return {
+        ...state,
+        value: removeLineBefore(state.value, state.cursor),
+        cursor: 0,
+      };
     case 'CLEAR_AFTER':
       return { ...state, value: removeLineAfter(state.value, state.cursor) };
     case 'RESET':
@@ -151,24 +158,27 @@ export const ShellInput: FC<ShellInputProps> = ({
 
   useInput((input, key) => {
     const isCtrl = key.ctrl || key.meta;
-    
-    // In Ink 7.0.0, key.backspace and key.delete are correctly reported on Windows.
-    const isBackspace = key.backspace;
+
+    // Standard high-level flags from Ink 7.0.0
+    const isBackspace =
+      key.backspace || input === '\x7f' || input === '\x08' || input === '\b';
     const isDelete = key.delete || (isCtrl && input === 'd');
 
     if (key.upArrow) return dispatch({ type: 'MOVE_UP' });
     if (key.downArrow) return dispatch({ type: 'MOVE_DOWN' });
-    
-    // Ink 7.0.0 added official support for home/end keys in the Kitty protocol
-    if ((isCtrl && input === 'a') || (key as any).home) return dispatch({ type: 'HOME' });
-    if ((isCtrl && input === 'e') || (key as any).end) return dispatch({ type: 'END' });
-    
+
+    if ((isCtrl && input === 'a') || (key as { home?: boolean }).home)
+      return dispatch({ type: 'HOME' });
+    if ((isCtrl && input === 'e') || (key as { end?: boolean }).end)
+      return dispatch({ type: 'END' });
+
     if (key.leftArrow) return dispatch({ type: 'MOVE_LEFT', isCtrl });
     if (key.rightArrow) return dispatch({ type: 'MOVE_RIGHT', isCtrl });
-    
-    if (isBackspace) return dispatch({ type: 'BACKSPACE', isCtrl });
-    if (isDelete) return dispatch({ type: 'DELETE' });
-    
+
+    // Simple single-character backspace only to avoid Windows Terminal byte collision bugs
+    if (isBackspace) return dispatch({ type: 'BACKSPACE' });
+    if (isDelete) return dispatch({ type: 'DELETE', isCtrl });
+
     if (isCtrl && input === 'u') return dispatch({ type: 'CLEAR_BEFORE' });
     if (isCtrl && input === 'k') return dispatch({ type: 'CLEAR_AFTER' });
 
@@ -181,18 +191,28 @@ export const ShellInput: FC<ShellInputProps> = ({
       return dispatch({ type: 'RESET' });
     }
 
-    // Filter printable characters (exclude control codes and meta keys)
-    // We explicitly exclude \r, \n, \t and common control ranges
-    const isPrintable = !isCtrl && !key.meta && !isBackspace && !isDelete && 
-                        input !== '\r' && input !== '\n' && input !== '\t' &&
-                        /^[^\x00-\x1F\x7F-\x9F]+$/.test(input);
+    const isPrintable =
+      !isCtrl &&
+      !key.meta &&
+      !isBackspace &&
+      !isDelete &&
+      input !== '\r' &&
+      input !== '\n' &&
+      input !== '\t' &&
+      Array.from(input).every((char) => {
+        const code = char.charCodeAt(0);
+        return (code >= 32 && code <= 126) || code >= 160;
+      });
 
     if (isPrintable) {
       dispatch({ type: 'TYPE', char: input });
     }
   });
 
-  const { before, at, after } = parseShellComposerParts(state.value, state.cursor);
+  const { before, at, after } = parseShellComposerParts(
+    state.value,
+    state.cursor,
+  );
 
   return (
     <Box>

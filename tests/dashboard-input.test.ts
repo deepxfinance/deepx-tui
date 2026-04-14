@@ -15,6 +15,7 @@ import {
   removeCharAt,
   removeLineAfter,
   removeLineBefore,
+  removeWordAfter,
   removeWordBefore,
 } from '../src/lib/dashboard-input';
 
@@ -119,6 +120,12 @@ describe('dashboard input helpers', () => {
       expect(removeWordBefore(text, 5)).toBe(' world  deepx-tui');
       expect(removeWordBefore(text, 19)).toBe('hello world  tui');
       expect(removeWordBefore(text, 22)).toBe('hello world  deepx-');
+    });
+
+    test('removes word after cursor', () => {
+      expect(removeWordAfter(text, 0)).toBe(' world  deepx-tui');
+      expect(removeWordAfter(text, 5)).toBe('hello  deepx-tui');
+      expect(removeWordAfter(text, 11)).toBe('hello world-tui');
     });
 
     test('removes line before cursor (Ctrl+U)', () => {

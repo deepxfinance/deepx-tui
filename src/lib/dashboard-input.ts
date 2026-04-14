@@ -165,6 +165,11 @@ export function removeWordBefore(input: string, currentIndex: number): string {
   return input.slice(0, prevWordStart) + input.slice(currentIndex);
 }
 
+export function removeWordAfter(input: string, currentIndex: number): string {
+  const nextWordEnd = getNextWordIndex(input, currentIndex);
+  return input.slice(0, currentIndex) + input.slice(nextWordEnd);
+}
+
 export function removeLineBefore(input: string, currentIndex: number): string {
   return input.slice(currentIndex);
 }
