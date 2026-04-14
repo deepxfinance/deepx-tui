@@ -10,8 +10,8 @@
 - Bun as runtime, package manager, and test runner
 - Ink + React for terminal rendering
 - `bin/deepx` as the user-facing command entrypoint
-- per-network wallet bootstrap before dashboard entry
-- fullscreen dashboard layout with market strip, realtime chart, orderbook, trades, AI chat, and a lower utility row for live positions and optional debug logs
+- per-network wallet bootstrap before shell entry
+- fullscreen shell layout with a welcome panel, AI transcript, slash-command workspace, bottom input bar, and persistent network line
 
 ## Structure Rationale
 
@@ -53,4 +53,5 @@
 - Read local wallet metadata for the selected network
 - If missing, render the simplified encrypted wallet import flow
 - If present, prompt for the wallet passphrase and keep it in process memory for the session
-- After unlock, enter the fullscreen market dashboard
+- Allow `Esc` on wallet bootstrap to open the shell in read-only mode
+- After unlock, import, or skip, enter the fullscreen shell

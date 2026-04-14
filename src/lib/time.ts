@@ -57,17 +57,39 @@ export function formatChartTimestamp(
     return fallbackTimeLabel(resolution);
   }
 
+  const timeZone = getUserTimeZone();
+
   if (resolution === '1M') {
-    return `${monthLabel(date.getUTCMonth())} ${String(date.getUTCFullYear()).slice(-2)}`;
+    return `${monthLabel(resolveDateParts(date, timeZone).month - 1)} ${String(resolveDateParts(date, timeZone).year).slice(-2)}`;
   }
 
   if (resolution === '1D' || resolution === '1W') {
-    return `${String(date.getUTCDate()).padStart(2, '0')} ${monthLabel(date.getUTCMonth())}`;
+    const { day, month } = resolveDateParts(date, timeZone);
+    return `${String(day).padStart(2, '0')} ${monthLabel(month - 1)}`;
   }
 
-  return `${String(date.getUTCHours()).padStart(2, '0')}:${String(
-    date.getUTCMinutes(),
-  ).padStart(2, '0')}`;
+  return formatLocalTimeOfDay(normalizedTimestamp, timeZone);
+}
+
+export function formatLocalTimeOfDay(
+  timestamp: number | string | undefined,
+  timeZone = getUserTimeZone(),
+): string {
+  if (timestamp == null) {
+    return '--:--';
+  }
+
+  const normalizedTimestamp =
+    typeof timestamp === 'number'
+      ? normalizeUnixTimestamp(timestamp)
+      : timestamp;
+  const date = new Date(normalizedTimestamp);
+  if (Number.isNaN(date.getTime())) {
+    return '--:--';
+  }
+
+  const { hour, minute } = resolveTimeParts(date, timeZone);
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
 function fallbackTimeLabel(resolution: string): string {
@@ -112,4 +134,56 @@ function resolutionToMilliseconds(resolution: string): number {
     default:
       return 5 * 60_000;
   }
+}
+
+function getUserTimeZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+}
+
+function resolveDateParts(
+  date: Date,
+  timeZone: string,
+): { year: number; month: number; day: number } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+
+  return {
+    year: Number(findPart(parts, 'year')),
+    month: Number(findPart(parts, 'month')),
+    day: Number(findPart(parts, 'day')),
+  };
+}
+
+function resolveTimeParts(
+  date: Date,
+  timeZone: string,
+): { hour: number; minute: number } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+
+  return {
+    hour: Number(findPart(parts, 'hour')),
+    minute: Number(findPart(parts, 'minute')),
+  };
+}
+
+function findPart(
+  parts: Intl.DateTimeFormatPart[],
+  type:
+    | Intl.DateTimeFormatPartTypesRegistry[keyof Intl.DateTimeFormatPartTypesRegistry]
+    | 'year'
+    | 'month'
+    | 'day'
+    | 'hour'
+    | 'minute',
+): string {
+  return parts.find((part) => part.type === type)?.value ?? '0';
 }

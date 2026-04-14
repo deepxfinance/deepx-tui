@@ -23,11 +23,12 @@ Set `GEMINI_API_KEY` or `GOOGLE_API_KEY` before launch if you want live AI chat 
 
 - `devnet` is the default network
 - `--network testnet` switches to testnet
-- `--mode debug` enables an in-dashboard debug log panel
+- `--mode debug` is preserved, but the primary shell remains chat-first
 - the app checks for an encrypted wallet file for the selected network
-- if a wallet already exists, it asks for the wallet passphrase before entering the dashboard
+- if a wallet already exists, it asks for the wallet passphrase before entering the shell
 - if no wallet is found, it opens a simplified import flow with only private key and passphrase
-- after unlock or import, it opens the fullscreen market dashboard
+- pressing `Esc` during wallet unlock or import opens the shell in read-only mode
+- after unlock, import, or skip, it opens the fullscreen shell
 - the passphrase stays in process memory for the current session so later live order actions can reuse it
 - the AI chat panel uses the Google GenAI SDK with `gemini-3-flash-preview`
 - the chat agent can call the built-in DeepX tools directly for market lookup and order workflows
@@ -41,23 +42,22 @@ Set `GEMINI_API_KEY` or `GOOGLE_API_KEY` before launch if you want live AI chat 
 - when the debug panel is focused, type to search logs by scope, level, message, or details; `Backspace` edits and `Esc` clears the filter
 - no MCP server is required for the dashboard chat flow
 
-## Dashboard Keys
+## Shell Keys
 
 - `q` quit
-- `tab` cycle focus
-- `1` switch to perp pairs
-- `2` switch to spot pairs
-- left/right or `h`/`l` change pair when the market strip is focused
-- `[` and `]` change chart resolution when the chart is focused
-- type, `backspace`, `esc`, and `enter` control the chat panel when it is focused
-- in debug mode, `tab` also reaches the debug panel and typing filters the log stream
+- type into the bottom input bar for chat or slash commands
+- `/candle`, `/orderbook`, and `/help` are the supported commands
+- `enter` submits input or confirms the selected pair
+- `backspace` edits the input bar
+- `esc` skips wallet boot or exits pair selection back to the input bar
+- `up` and `down` move through the pair picker after `/candle` or `/orderbook`
+- `[` and `]` change chart resolution while candle view is active
 
-## Current Dashboard Surface
+## Current Shell Surface
 
-- header market strip with network badge and wallet summary
-- realtime candle chart with volume bars and stream status
-- orderbook and recent trades panels
-- AI chat panel for market and execution assistance
-- live perp positions panel for the unlocked wallet
-- bottom status panel with CLI version and websocket delay
-- no direct order-entry form is implemented in the TUI yet
+- welcome panel at the top of the shell
+- AI transcript above the input bar
+- workspace area for `/candle`, `/orderbook`, and `/help`
+- pair picker after `/candle` and `/orderbook`
+- command history line above the input bar
+- persistent current network line below the input bar

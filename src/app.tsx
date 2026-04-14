@@ -26,7 +26,11 @@ type ViewState =
   | { kind: 'loading' }
   | { kind: 'wallet-unlock'; wallet: StoredWalletRecord }
   | { kind: 'wallet-import' }
-  | { kind: 'dashboard'; wallet: StoredWalletRecord }
+  | {
+      kind: 'dashboard';
+      wallet?: StoredWalletRecord;
+      walletUnlocked: boolean;
+    }
   | { kind: 'error'; message: string };
 
 export const App: FC<AppProps> = ({ cli, commandName }) => {
@@ -95,7 +99,7 @@ export const App: FC<AppProps> = ({ cli, commandName }) => {
       });
       rememberWalletPassphrase(cli.network.id, input.passphrase);
       logInfo('wallet', 'Wallet saved and unlocked', wallet.address);
-      setViewState({ kind: 'dashboard', wallet });
+      setViewState({ kind: 'dashboard', wallet, walletUnlocked: true });
     } catch (error) {
       logError('wallet', 'Wallet save failed', formatErrorMessage(error));
       setWalletStepError((error as Error).message);
@@ -116,7 +120,11 @@ export const App: FC<AppProps> = ({ cli, commandName }) => {
       verifyWalletPassphrase(viewState.wallet, input.passphrase);
       rememberWalletPassphrase(cli.network.id, input.passphrase);
       logInfo('wallet', 'Wallet unlocked', viewState.wallet.address);
-      setViewState({ kind: 'dashboard', wallet: viewState.wallet });
+      setViewState({
+        kind: 'dashboard',
+        wallet: viewState.wallet,
+        walletUnlocked: true,
+      });
     } catch (error) {
       logError('wallet', 'Wallet unlock failed', formatErrorMessage(error));
       setWalletStepError((error as Error).message);
@@ -145,6 +153,13 @@ export const App: FC<AppProps> = ({ cli, commandName }) => {
         errorMessage={walletStepError}
         isSaving={isSavingWallet}
         network={cli.network}
+        onSkip={() =>
+          setViewState({
+            kind: 'dashboard',
+            wallet: undefined,
+            walletUnlocked: false,
+          })
+        }
         onSubmit={handleWalletSubmit}
       />
     );
@@ -156,6 +171,13 @@ export const App: FC<AppProps> = ({ cli, commandName }) => {
         errorMessage={walletStepError}
         isUnlocking={isUnlockingWallet}
         network={cli.network}
+        onSkip={() =>
+          setViewState({
+            kind: 'dashboard',
+            wallet: viewState.wallet,
+            walletUnlocked: false,
+          })
+        }
         walletAddress={viewState.wallet.address}
         onSubmit={handleWalletUnlock}
       />
@@ -176,7 +198,8 @@ export const App: FC<AppProps> = ({ cli, commandName }) => {
     <DashboardScreen
       mode={cli.mode}
       network={cli.network}
-      walletAddress={viewState.wallet.address}
+      walletAddress={viewState.wallet?.address}
+      walletUnlocked={viewState.walletUnlocked}
     />
   );
 };

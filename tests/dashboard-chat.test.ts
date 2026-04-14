@@ -7,6 +7,7 @@ import {
   createChatMessage,
   createInitialChatMessages,
   getChatLoadingMessage,
+  getChatLoadingSegments,
   getVisibleChatMessages,
 } from '../src/lib/dashboard-chat';
 
@@ -29,6 +30,7 @@ describe('dashboard chat', () => {
     expect(
       buildGenAiContents([
         { id: 'user-1', role: 'user', content: 'hello' },
+        { id: 'command-2', role: 'command', content: '/help' },
         { id: 'assistant-2', role: 'assistant', content: 'hi' },
       ]),
     ).toEqual([
@@ -82,5 +84,117 @@ describe('dashboard chat', () => {
     expect(getChatLoadingMessage(1)).toBe('Thinking..');
     expect(getChatLoadingMessage(2)).toBe('Thinking...');
     expect(getChatLoadingMessage(3)).toBe('Thinking.');
+  });
+
+  test('builds shimmer segments for the loading message', () => {
+    expect(getChatLoadingSegments(0)).toEqual([
+      {
+        key: 'loading-0-T',
+        text: 'T',
+        color: '#2D7FA3',
+        dimColor: false,
+        bold: false,
+      },
+      {
+        key: 'loading-1-h',
+        text: 'h',
+        color: undefined,
+        dimColor: true,
+        bold: false,
+      },
+      {
+        key: 'loading-2-i',
+        text: 'i',
+        color: undefined,
+        dimColor: true,
+        bold: false,
+      },
+      {
+        key: 'loading-3-n',
+        text: 'n',
+        color: undefined,
+        dimColor: true,
+        bold: false,
+      },
+      {
+        key: 'loading-4-k',
+        text: 'k',
+        color: undefined,
+        dimColor: true,
+        bold: false,
+      },
+      {
+        key: 'loading-5-i',
+        text: 'i',
+        color: undefined,
+        dimColor: true,
+        bold: false,
+      },
+      {
+        key: 'loading-6-n',
+        text: 'n',
+        color: undefined,
+        dimColor: true,
+        bold: false,
+      },
+      {
+        key: 'loading-7-g',
+        text: 'g',
+        color: undefined,
+        dimColor: true,
+        bold: false,
+      },
+      {
+        key: 'loading-8-dot',
+        text: '.',
+        color: undefined,
+        dimColor: true,
+        bold: false,
+      },
+    ]);
+    expect(getChatLoadingSegments(8).slice(3, 9)).toEqual([
+      {
+        key: 'loading-3-n',
+        text: 'n',
+        color: '#4BB6E3',
+        dimColor: false,
+        bold: false,
+      },
+      {
+        key: 'loading-4-k',
+        text: 'k',
+        color: '#7FDBFF',
+        dimColor: false,
+        bold: false,
+      },
+      {
+        key: 'loading-5-i',
+        text: 'i',
+        color: '#F2FDFF',
+        dimColor: false,
+        bold: true,
+      },
+      {
+        key: 'loading-6-n',
+        text: 'n',
+        color: '#7FDBFF',
+        dimColor: false,
+        bold: false,
+      },
+      {
+        key: 'loading-7-g',
+        text: 'g',
+        color: '#4BB6E3',
+        dimColor: false,
+        bold: false,
+      },
+      {
+        key: 'loading-8-dot',
+        text: '.',
+        color: '#2D7FA3',
+        dimColor: false,
+        bold: false,
+      },
+    ]);
   });
 });

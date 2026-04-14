@@ -10,6 +10,7 @@ import {
 
 type PositionsPanelProps = {
   height: number;
+  isFocused?: boolean;
   pairs: MarketPair[];
   positions: PerpPosition[];
   overview: Record<string, { latestPrice?: number }>;
@@ -17,6 +18,7 @@ type PositionsPanelProps = {
 
 export const PositionsPanel: FC<PositionsPanelProps> = ({
   height,
+  isFocused = false,
   pairs,
   positions,
   overview,
@@ -33,13 +35,13 @@ export const PositionsPanel: FC<PositionsPanelProps> = ({
     <Box
       flexDirection="column"
       borderStyle="round"
-      borderColor="gray"
+      borderColor={isFocused ? 'yellow' : 'gray'}
       paddingX={1}
       height={height}
       overflow="hidden"
       flexGrow={1}
     >
-      <Text color="gray">Positions</Text>
+      <Text color={isFocused ? 'yellow' : 'gray'}>Positions</Text>
       <Text color="gray">{getPositionPanelHeader()}</Text>
       {rows.map((row) => (
         <Text key={row.key} color={row.tone}>

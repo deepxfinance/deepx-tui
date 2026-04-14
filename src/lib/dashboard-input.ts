@@ -1,78 +1,102 @@
-export type DashboardFocusTarget =
-  | 'pairs'
-  | 'chart'
-  | 'orderbook'
-  | 'trades'
-  | 'chat'
-  | 'debug';
+import { truncateMiddle } from './format';
 
-const FOCUS_ORDER: DashboardFocusTarget[] = [
-  'pairs',
-  'chart',
-  'orderbook',
-  'trades',
-  'chat',
-];
+export type ShellCommand = 'candle' | 'orderbook' | 'help';
 
-const CHAT_PLACEHOLDER = 'Ask about the market, keys, or the current pair...';
-const DEBUG_FILTER_PLACEHOLDER = 'Filter logs by scope, message, or details...';
+export type ParsedShellInput =
+  | { kind: 'chat'; message: string }
+  | { kind: 'command'; command: ShellCommand };
 
-export function getPairKindShortcut(
-  input: string,
-  focusTarget: DashboardFocusTarget,
-): 'perp' | 'spot' | null {
-  if (focusTarget === 'chat') {
-    return null;
+export type PairPickerItem = {
+  label: string;
+  description: string;
+};
+
+const CHAT_PLACEHOLDER = 'Type a message or use /candle, /orderbook, /help';
+const HISTORY_PLACEHOLDER = 'No history yet.';
+
+export function parseShellInput(input: string): ParsedShellInput | undefined {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return undefined;
   }
 
-  if (input === '1') {
-    return 'perp';
+  if (!trimmed.startsWith('/')) {
+    return {
+      kind: 'chat',
+      message: trimmed,
+    };
   }
 
-  if (input === '2') {
-    return 'spot';
+  const normalizedCommand = trimmed.slice(1).trim().toLowerCase();
+  if (
+    normalizedCommand === 'candle' ||
+    normalizedCommand === 'orderbook' ||
+    normalizedCommand === 'help'
+  ) {
+    return {
+      kind: 'command',
+      command: normalizedCommand,
+    };
   }
 
-  return null;
+  return {
+    kind: 'chat',
+    message: trimmed,
+  };
 }
 
-export function formatChatComposerLine(
+export function formatShellComposerLine(
   input: string,
-  focusTarget: DashboardFocusTarget,
+  isFocused = true,
 ): string {
-  if (focusTarget !== 'chat') {
-    return `> ${input || CHAT_PLACEHOLDER}`;
-  }
-
   if (!input) {
-    return `> █ ${CHAT_PLACEHOLDER}`;
+    return isFocused ? `> █ ${CHAT_PLACEHOLDER}` : `> ${CHAT_PLACEHOLDER}`;
   }
 
-  return `> ${input}█`;
+  return isFocused ? `> ${input}█` : `> ${input}`;
 }
 
-export function formatDebugFilterLine(
-  input: string,
-  focusTarget: DashboardFocusTarget,
-): string {
-  if (focusTarget !== 'debug') {
-    return `filter> ${input || DEBUG_FILTER_PLACEHOLDER}`;
+export function formatHistoryLine(entries: string[], maxItems = 3): string {
+  const visibleEntries = entries
+    .filter((entry) => entry.trim().length > 0)
+    .slice(-Math.max(maxItems, 1));
+
+  if (visibleEntries.length === 0) {
+    return `History: ${HISTORY_PLACEHOLDER}`;
   }
 
-  if (!input) {
-    return `filter> █ ${DEBUG_FILTER_PLACEHOLDER}`;
-  }
-
-  return `filter> ${input}█`;
+  return `History: ${visibleEntries.join('  |  ')}`;
 }
 
-export function cycleFocusTarget(
-  focusTarget: DashboardFocusTarget,
-  includeDebug = false,
-): DashboardFocusTarget {
-  const focusOrder: DashboardFocusTarget[] = includeDebug
-    ? [...FOCUS_ORDER, 'debug']
-    : [...FOCUS_ORDER];
-  const currentIndex = focusOrder.indexOf(focusTarget);
-  return focusOrder[(currentIndex + 1) % focusOrder.length] ?? 'pairs';
+export function formatNetworkLine(input: {
+  networkLabel: string;
+  walletAddress?: string;
+  walletUnlocked: boolean;
+}) {
+  const walletLabel = input.walletAddress
+    ? truncateMiddle(input.walletAddress)
+    : 'no wallet loaded';
+  const modeLabel = input.walletUnlocked ? 'wallet unlocked' : 'read-only';
+  return `Network: ${input.networkLabel}  |  ${modeLabel}  |  ${walletLabel}`;
+}
+
+export function moveSelectionIndex(
+  currentIndex: number,
+  itemCount: number,
+  direction: -1 | 1,
+) {
+  if (itemCount <= 0) {
+    return 0;
+  }
+
+  return (currentIndex + direction + itemCount) % itemCount;
+}
+
+export function buildPairPickerItems(
+  pairs: Array<{ kind: string; label: string }>,
+): PairPickerItem[] {
+  return pairs.map((pair) => ({
+    label: pair.label,
+    description: pair.kind.toUpperCase(),
+  }));
 }

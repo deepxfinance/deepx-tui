@@ -1,50 +1,73 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
-  cycleFocusTarget,
-  formatChatComposerLine,
-  formatDebugFilterLine,
-  getPairKindShortcut,
+  buildPairPickerItems,
+  formatHistoryLine,
+  formatNetworkLine,
+  formatShellComposerLine,
+  moveSelectionIndex,
+  parseShellInput,
 } from '../src/lib/dashboard-input';
 
 describe('dashboard input helpers', () => {
-  test('keeps pair-switch shortcuts inactive while chat is focused', () => {
-    expect(getPairKindShortcut('1', 'chat')).toBeNull();
-    expect(getPairKindShortcut('2', 'chat')).toBeNull();
+  test('parses supported slash commands', () => {
+    expect(parseShellInput('/candle')).toEqual({
+      kind: 'command',
+      command: 'candle',
+    });
+    expect(parseShellInput('/orderbook')).toEqual({
+      kind: 'command',
+      command: 'orderbook',
+    });
+    expect(parseShellInput('/help')).toEqual({
+      kind: 'command',
+      command: 'help',
+    });
   });
 
-  test('returns pair-switch shortcuts outside chat focus', () => {
-    expect(getPairKindShortcut('1', 'pairs')).toBe('perp');
-    expect(getPairKindShortcut('2', 'chart')).toBe('spot');
+  test('treats unknown slash input as chat', () => {
+    expect(parseShellInput('/unknown')).toEqual({
+      kind: 'chat',
+      message: '/unknown',
+    });
   });
 
-  test('cycles focus through the trades panel before chat', () => {
-    expect(cycleFocusTarget('pairs')).toBe('chart');
-    expect(cycleFocusTarget('chart')).toBe('orderbook');
-    expect(cycleFocusTarget('orderbook')).toBe('trades');
-    expect(cycleFocusTarget('trades')).toBe('chat');
-    expect(cycleFocusTarget('chat')).toBe('pairs');
-  });
-
-  test('cycles focus into debug when debug mode is enabled', () => {
-    expect(cycleFocusTarget('chat', true)).toBe('debug');
-    expect(cycleFocusTarget('debug', true)).toBe('pairs');
-  });
-
-  test('renders a visible cursor for the active empty chat composer', () => {
-    expect(formatChatComposerLine('', 'chat')).toBe(
-      '> █ Ask about the market, keys, or the current pair...',
+  test('renders a visible cursor for the active empty shell input', () => {
+    expect(formatShellComposerLine('', true)).toBe(
+      '> █ Type a message or use /candle, /orderbook, /help',
     );
   });
 
-  test('renders a trailing cursor for active chat input', () => {
-    expect(formatChatComposerLine('0.01', 'chat')).toBe('> 0.01█');
+  test('renders recent history entries above the input', () => {
+    expect(formatHistoryLine(['hello', '/candle', 'orderbook:ETH-USDC'])).toBe(
+      'History: hello  |  /candle  |  orderbook:ETH-USDC',
+    );
   });
 
-  test('renders a visible cursor for the active debug filter', () => {
-    expect(formatDebugFilterLine('', 'debug')).toBe(
-      'filter> █ Filter logs by scope, message, or details...',
-    );
-    expect(formatDebugFilterLine('relay', 'debug')).toBe('filter> relay█');
+  test('renders the persistent network line', () => {
+    expect(
+      formatNetworkLine({
+        networkLabel: 'DeepX Devnet',
+        walletAddress: '0x1234000000000000000000000000000000005678',
+        walletUnlocked: false,
+      }),
+    ).toContain('Network: DeepX Devnet');
+  });
+
+  test('moves pair selection with wraparound', () => {
+    expect(moveSelectionIndex(0, 4, -1)).toBe(3);
+    expect(moveSelectionIndex(3, 4, 1)).toBe(0);
+  });
+
+  test('builds pair picker items from market pairs', () => {
+    expect(
+      buildPairPickerItems([
+        { label: 'ETH-USDC', kind: 'perp' },
+        { label: 'SOL/USDC', kind: 'spot' },
+      ]),
+    ).toEqual([
+      { label: 'ETH-USDC', description: 'PERP' },
+      { label: 'SOL/USDC', description: 'SPOT' },
+    ]);
   });
 });

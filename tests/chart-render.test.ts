@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { buildChartModel } from '../src/components/chart/chart-render';
 import { createPriceScale } from '../src/components/chart/chart-scale';
+import { formatChartTimestamp } from '../src/lib/time';
 
 const candles = [
   {
@@ -58,7 +59,9 @@ describe('chart render', () => {
 
     expect(model.rows).toHaveLength(4);
     expect(model.volumeRows).toHaveLength(4);
-    expect(timeAxisText.includes('00:00')).toBeTrue();
+    expect(
+      timeAxisText.includes(formatChartTimestamp(candles[0]?.time, '1')),
+    ).toBeTrue();
     expect(timeAxisText.trim().length).toBeGreaterThan(0);
   });
 

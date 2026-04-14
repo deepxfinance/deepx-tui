@@ -17,7 +17,7 @@ describe('perp trading config', () => {
 
   test('network config exposes chain and explorer metadata', () => {
     expect(getNetworkConfig('devnet')).toMatchObject({
-      chainId: 4835,
+      chainId: 4845,
       explorerUrl: 'http://explorer-devnet.deepx.fi',
     });
   });

@@ -1,6 +1,6 @@
 export type ChatMessage = {
   id: string;
-  role: 'assistant' | 'user';
+  role: 'assistant' | 'user' | 'command';
   content: string;
 };
 
@@ -14,6 +14,23 @@ type ChatPromptContext = {
 const MAX_CHAT_MESSAGES = 12;
 const MAX_GENAI_HISTORY = 8;
 const CHAT_LOADING_FRAMES = ['.', '..', '...'];
+const CHAT_LOADING_BASE = 'Thinking';
+const CHAT_LOADING_SHIMMER_COLORS = [
+  '#2D7FA3',
+  '#4BB6E3',
+  '#7FDBFF',
+  '#F2FDFF',
+  '#7FDBFF',
+  '#4BB6E3',
+];
+
+export type ChatLoadingSegment = {
+  key: string;
+  text: string;
+  color?: string;
+  dimColor: boolean;
+  bold: boolean;
+};
 
 export function createInitialChatMessages(): ChatMessage[] {
   return [
@@ -73,10 +90,13 @@ export function buildChatSystemPrompt(context: ChatPromptContext): string {
 }
 
 export function buildGenAiContents(messages: ChatMessage[]) {
-  return messages.slice(-MAX_GENAI_HISTORY).map((message) => ({
-    role: message.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: message.content }],
-  }));
+  return messages
+    .filter((message) => message.role !== 'command')
+    .slice(-MAX_GENAI_HISTORY)
+    .map((message) => ({
+      role: message.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: message.content }],
+    }));
 }
 
 export function createChatMessage(
@@ -96,11 +116,44 @@ export function getChatLoadingMessage(frameIndex: number): string {
   const frame =
     CHAT_LOADING_FRAMES[Math.abs(frameIndex) % CHAT_LOADING_FRAMES.length] ??
     CHAT_LOADING_FRAMES[0];
-  return `Thinking${frame}`;
+  return `${CHAT_LOADING_BASE}${frame}`;
+}
+
+export function getChatLoadingSegments(
+  frameIndex: number,
+): ChatLoadingSegment[] {
+  const text = getChatLoadingMessage(frameIndex);
+  const shimmerPosition =
+    Math.abs(frameIndex) % (text.length + CHAT_LOADING_SHIMMER_COLORS.length);
+  const highlightIndex = Math.floor(CHAT_LOADING_SHIMMER_COLORS.length / 2);
+
+  return text.split('').map((character, index) => {
+    const color = getShimmerColor(index, shimmerPosition);
+
+    return {
+      key: `loading-${index}-${character === '.' ? 'dot' : character}`,
+      text: character,
+      color,
+      dimColor: color === undefined,
+      bold: shimmerPosition - index === highlightIndex,
+    };
+  });
 }
 
 function getNextMessageId(messages: ChatMessage[]): number {
   const lastId = messages.at(-1)?.id ?? 'assistant-0';
   const suffix = Number(lastId.split('-').at(-1) ?? 0);
   return Number.isFinite(suffix) ? suffix + 1 : messages.length + 1;
+}
+
+function getShimmerColor(
+  index: number,
+  shimmerPosition: number,
+): string | undefined {
+  const colorIndex = shimmerPosition - index;
+  if (colorIndex < 0 || colorIndex >= CHAT_LOADING_SHIMMER_COLORS.length) {
+    return undefined;
+  }
+
+  return CHAT_LOADING_SHIMMER_COLORS[colorIndex];
 }

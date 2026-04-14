@@ -30,7 +30,8 @@ bun test
 
 - The executable entrypoint is `bin/deepx`
 - The wallet store is per-network and written to your local config directory
-- When a wallet file already exists, the TUI asks for the passphrase before entering the dashboard
+- When a wallet file already exists, the TUI asks for the passphrase before entering the shell
+- Pressing `Esc` during wallet unlock or import opens the shell in read-only mode
 - Successful unlock keeps the passphrase in process memory for explicit execution workflows in the same session
 - The AI chat panel uses `@google/genai` directly and accepts either `GEMINI_API_KEY` or `GOOGLE_API_KEY`
 - The current agent model target is `gemini-3-flash-preview`
@@ -40,8 +41,8 @@ bun test
 - AI chat still blocks live order cancellation
 - AI chat still blocks live position close and TP/SL update actions
 - simple trade commands such as `buy 0.001 ETH` are parsed locally and staged for `confirm`, bypassing the LLM for deterministic order entry
-- the dashboard renders a live perp positions panel for the unlocked wallet, sourced from the market websocket `user_perp_positions` stream
-- `--mode debug` keeps that positions panel visible and adds a live debug panel sourced from the shared in-process logger in the same lower utility row
+- the shell is chat-first and uses slash commands for market views
+- `/candle` and `/orderbook` first require pair selection, then reuse live market data streams for the chosen pair
 - debug mode captures HTTP market requests, RPC transaction submissions, websocket events, and wallet/chat lifecycle events in the shared logger
 - default mode keeps the shared logger at warn/error level to avoid constant websocket logging overhead
 - sensitive fields such as `signedTx`, `passphrase`, and `privateKey` are redacted before entering the logger

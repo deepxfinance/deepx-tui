@@ -15,6 +15,7 @@ type WalletUnlockScreenProps = {
   errorMessage?: string;
   isUnlocking: boolean;
   onSubmit: (input: { passphrase: string }) => Promise<void>;
+  onSkip: () => void;
 };
 
 export const WalletUnlockScreen: FC<WalletUnlockScreenProps> = ({
@@ -23,6 +24,7 @@ export const WalletUnlockScreen: FC<WalletUnlockScreenProps> = ({
   errorMessage,
   isUnlocking,
   onSubmit,
+  onSkip,
 }) => {
   const [passphrase, setPassphrase] = useState('');
   const [isSecretVisible, setIsSecretVisible] = useState(false);
@@ -37,6 +39,11 @@ export const WalletUnlockScreen: FC<WalletUnlockScreenProps> = ({
 
     if (key.ctrl && input === 'r') {
       setIsSecretVisible((value) => !value);
+      return;
+    }
+
+    if (key.escape) {
+      onSkip();
       return;
     }
 
@@ -102,7 +109,8 @@ export const WalletUnlockScreen: FC<WalletUnlockScreenProps> = ({
           <Text color="red">{effectiveError}</Text>
         ) : (
           <Text color="gray">
-            Press Enter to unlock. Ctrl+R toggles passphrase visibility.
+            Press Enter to unlock. Ctrl+R toggles passphrase visibility. Esc
+            skips.
           </Text>
         )}
         <Text color="gray">

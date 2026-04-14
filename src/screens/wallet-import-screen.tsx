@@ -15,6 +15,7 @@ type WalletImportScreenProps = {
     privateKey: string;
     passphrase: string;
   }) => Promise<void>;
+  onSkip: () => void;
 };
 
 type FieldKey = 'privateKey' | 'passphrase';
@@ -27,6 +28,7 @@ export const WalletImportScreen: FC<WalletImportScreenProps> = ({
   errorMessage,
   isSaving,
   onSubmit,
+  onSkip,
 }) => {
   const [privateKey, setPrivateKey] = useState('');
   const [passphrase, setPassphrase] = useState('');
@@ -43,6 +45,11 @@ export const WalletImportScreen: FC<WalletImportScreenProps> = ({
 
     if (key.ctrl && input === 'r') {
       setIsSecretVisible((value) => !value);
+      return;
+    }
+
+    if (key.escape) {
+      onSkip();
       return;
     }
 
@@ -139,7 +146,7 @@ export const WalletImportScreen: FC<WalletImportScreenProps> = ({
         ) : (
           <Text color="gray">
             Tab switches fields. Enter advances or saves. Ctrl+R toggles secret
-            visibility.
+            visibility. Esc skips.
           </Text>
         )}
         <Text color="gray">

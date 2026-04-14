@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   alignTimestampToResolution,
   formatChartTimestamp,
+  formatLocalTimeOfDay,
   normalizeUnixTimestamp,
 } from '../src/lib/time';
 
@@ -30,18 +31,60 @@ describe('alignTimestampToResolution', () => {
 });
 
 describe('formatChartTimestamp', () => {
-  test('formats intraday timestamps in utc', () => {
-    expect(formatChartTimestamp(Date.UTC(2026, 2, 26, 9, 5), '15')).toBe(
-      '09:05',
-    );
+  test('formats intraday timestamps in the machine timezone', () => {
+    const originalResolvedOptions =
+      Intl.DateTimeFormat.prototype.resolvedOptions;
+
+    Intl.DateTimeFormat.prototype.resolvedOptions = function resolvedOptions() {
+      return {
+        ...originalResolvedOptions.call(this),
+        timeZone: 'America/New_York',
+      };
+    };
+
+    try {
+      expect(formatChartTimestamp(Date.UTC(2026, 2, 26, 9, 5), '15')).toBe(
+        '05:05',
+      );
+    } finally {
+      Intl.DateTimeFormat.prototype.resolvedOptions = originalResolvedOptions;
+    }
   });
 
-  test('formats day and month labels for higher intervals', () => {
-    expect(formatChartTimestamp(Date.UTC(2026, 2, 26, 9, 5), '1D')).toBe(
-      '26 Mar',
-    );
-    expect(formatChartTimestamp(Date.UTC(2026, 2, 26, 9, 5), '1M')).toBe(
-      'Mar 26',
+  test('formats day and month labels in the machine timezone', () => {
+    const originalResolvedOptions =
+      Intl.DateTimeFormat.prototype.resolvedOptions;
+
+    Intl.DateTimeFormat.prototype.resolvedOptions = function resolvedOptions() {
+      return {
+        ...originalResolvedOptions.call(this),
+        timeZone: 'America/Los_Angeles',
+      };
+    };
+
+    try {
+      expect(formatChartTimestamp(Date.UTC(2026, 2, 26, 1, 5), '1D')).toBe(
+        '25 Mar',
+      );
+      expect(formatChartTimestamp(Date.UTC(2026, 2, 26, 1, 5), '1M')).toBe(
+        'Mar 26',
+      );
+    } finally {
+      Intl.DateTimeFormat.prototype.resolvedOptions = originalResolvedOptions;
+    }
+  });
+});
+
+describe('formatLocalTimeOfDay', () => {
+  test('formats numeric timestamps in an explicit timezone', () => {
+    expect(
+      formatLocalTimeOfDay(Date.UTC(2026, 2, 26, 9, 5), 'America/New_York'),
+    ).toBe('05:05');
+  });
+
+  test('formats iso timestamps in an explicit timezone', () => {
+    expect(formatLocalTimeOfDay('2026-03-26T09:05:00Z', 'Asia/Taipei')).toBe(
+      '17:05',
     );
   });
 });

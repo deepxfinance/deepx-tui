@@ -60,11 +60,11 @@ Direct entrypoint:
 
 - `bin/deepx` is the stable user-facing entrypoint
 - the app uses Bun, React, and Ink for a standalone terminal UI
-- startup stays simple: parse CLI flags, resolve network, load wallet metadata, unlock or import wallet, then enter the dashboard
+- startup stays simple: parse CLI flags, resolve network, load wallet metadata, offer unlock or import, then enter the shell
 - wallet storage is local and per-network
 - successful unlock keeps the wallet passphrase in process memory for the active session
-- the dashboard is a fullscreen layout with a market strip, realtime candle chart, orderbook, recent trades, AI chat, a live perp positions panel, and bottom status bar
-- `--mode debug` splits the lower utility row between the live perp positions panel and a filtered debug log panel
+- the app opens into a chat-first fullscreen shell with a welcome panel, AI transcript, slash commands, pair picker, bottom input bar, and persistent network line
+- `/candle` and `/orderbook` select a pair first, then render the requested market view in the workspace area
 - sensitive values such as `privateKey`, `passphrase`, and `signedTx` are redacted before entering logs
 
 ## Current Workflow
@@ -72,9 +72,10 @@ Direct entrypoint:
 1. `deepx` starts on `devnet` by default.
 2. Use `--network testnet` to switch to testnet.
 3. The app checks for an encrypted wallet file for the selected network.
-4. If a wallet exists, it prompts for the wallet passphrase before entering the dashboard.
+4. If a wallet exists, it prompts for the wallet passphrase before entering the shell.
 5. If no wallet exists, it opens a simplified import flow for private key and passphrase.
-6. After unlock or import, it opens the fullscreen dashboard.
+6. Press `Esc` in either wallet step to skip into a read-only shell.
+7. After unlock, import, or skip, it opens the fullscreen shell.
 
 ## AI Chat And Execution
 
@@ -86,16 +87,16 @@ Direct entrypoint:
 - AI-driven order cancellation remains blocked until a dedicated confirmation flow exists
 - AI-driven position close and TP/SL updates are exposed to the model but still blocked from live execution in chat
 
-## Dashboard Keys
+## Shell Keys
 
 - `q` quit
-- `tab` cycle focus
-- `1` switch to perp pairs
-- `2` switch to spot pairs
-- left/right or `h`/`l` change pair when the market strip is focused
-- `[` and `]` change chart resolution when the chart is focused
-- type, `backspace`, `esc`, and `enter` control the chat panel when it is focused
-- in debug mode, `tab` also reaches the debug panel and typing filters the log stream
+- type into the bottom input bar for chat or slash commands
+- `/candle`, `/orderbook`, and `/help` are the supported commands
+- `enter` submits input or confirms the selected pair
+- `backspace` edits the input bar
+- `esc` skips wallet boot or exits pair selection back to the input bar
+- `up` and `down` move through the pair picker after `/candle` or `/orderbook`
+- `[` and `]` change chart resolution while candle view is active
 
 ## Quality Checks
 
