@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
 import {
   buildDryRunClosePosition,
@@ -13,21 +13,32 @@ import {
   clearRememberedWalletPassphrase,
   rememberWalletPassphrase,
 } from '../src/services/wallet-session';
+import { installMockMarketApi } from './market-api-fixture';
+
+let restoreFetch: (() => void) | undefined;
 
 describe('order tools', () => {
+  beforeEach(() => {
+    restoreFetch = installMockMarketApi();
+  });
+
   afterEach(() => {
     clearRememberedWalletPassphrase('deepx_devnet');
     clearRememberedWalletPassphrase('deepx_testnet');
+    restoreFetch?.();
+    restoreFetch = undefined;
   });
 
-  test('lists supported markets for a network', () => {
+  test('lists supported markets for a network', async () => {
     expect(
-      listSupportedMarkets('deepx_devnet').map((market) => market.label),
+      (await listSupportedMarkets('deepx_devnet')).map(
+        (market) => market.label,
+      ),
     ).toEqual(['ETH-USDC', 'SOL-USDC', 'ETH/USDC', 'SOL/USDC']);
   });
 
-  test('builds a dry-run limit order ticket', () => {
-    const result = buildDryRunOrder({
+  test('builds a dry-run limit order ticket', async () => {
+    const result = await buildDryRunOrder({
       pair: 'ETH-USDC',
       side: 'BUY',
       type: 'LIMIT',
@@ -60,8 +71,8 @@ describe('order tools', () => {
     );
   });
 
-  test('rejects unsupported markets', () => {
-    expect(() =>
+  test('rejects unsupported markets', async () => {
+    await expect(
       buildDryRunOrder({
         pair: 'BTC-USDC',
         side: 'BUY',
@@ -69,7 +80,7 @@ describe('order tools', () => {
         size: '1',
         price: '100',
       }),
-    ).toThrow('Unsupported pair "BTC-USDC"');
+    ).rejects.toThrow('Unsupported pair "BTC-USDC"');
   });
 
   test('returns placeholder open orders in dry-run mode', () => {
@@ -125,9 +136,9 @@ describe('order tools', () => {
     });
   });
 
-  test('builds a dry-run close-position ticket', () => {
+  test('builds a dry-run close-position ticket', async () => {
     expect(
-      buildDryRunClosePosition({
+      await buildDryRunClosePosition({
         pair: 'ETH-USDC',
         price: '2500.5',
         confirm: true,
@@ -142,9 +153,9 @@ describe('order tools', () => {
     });
   });
 
-  test('builds a dry-run position update ticket', () => {
+  test('builds a dry-run position update ticket', async () => {
     expect(
-      buildDryRunPositionUpdate({
+      await buildDryRunPositionUpdate({
         pair: 'ETH-USDC',
         takeProfit: '2800',
         stopLoss: '2300',

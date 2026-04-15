@@ -1,16 +1,12 @@
-import {
-  Contract,
-  JsonRpcProvider,
-  parseUnits,
-  toBeHex,
-  Wallet,
-  zeroPadValue,
-} from 'ethers';
+import { Contract, parseUnits, toBeHex, Wallet, zeroPadValue } from 'ethers';
 
 import { getNetworkConfig, type RuntimeNetwork } from '../config/networks';
-import { getMarketPairs, type MarketPair } from './market-catalog';
+import { getNetworkMarkets, type MarketPair } from './market-catalog';
 import { resolvePrimarySubaccountAddress } from './subaccount-contract';
-import { submitRpcTransaction } from './transaction-submission';
+import {
+  createRpcProvider,
+  submitRpcTransaction,
+} from './transaction-submission';
 import { decryptPrivateKey, readWalletRecord } from './wallet-store';
 
 const SPOT_CONTRACT_ADDRESS = '0x000000000000000000000000000000000000044d';
@@ -60,13 +56,13 @@ export async function placeSpotOrderLive(input: PlaceSpotOrderInput): Promise<{
   }
 
   const privateKey = decryptPrivateKey(walletRecord.crypto, input.passphrase);
-  const provider = new JsonRpcProvider(network.rpcUrl);
+  const provider = createRpcProvider(network);
   const signer = new Wallet(privateKey, provider);
   const subaccountAddress = await resolvePrimarySubaccountAddress({
     walletAddress: walletRecord.address,
     provider,
   });
-  const pair = findLiveSpotPair(networkId, input.pair);
+  const pair = await findLiveSpotPair(networkId, input.pair);
   const order = buildSpotOrderCall({
     pair,
     side: input.side,
@@ -118,8 +114,12 @@ export async function placeSpotOrderLive(input: PlaceSpotOrderInput): Promise<{
   };
 }
 
-export function listLiveSpotPairs(): SpotPair[] {
-  return ['ETH/USDC', 'SOL/USDC'];
+export async function listLiveSpotPairs(
+  network: RuntimeNetwork = 'deepx_devnet',
+): Promise<SpotPair[]> {
+  return (await getNetworkMarkets(getNetworkConfig(network)))
+    .filter((pair) => pair.kind === 'spot')
+    .map((pair) => pair.label as SpotPair);
 }
 
 export function buildSpotOrderCall(input: {
@@ -207,8 +207,8 @@ export function encodeSpotPairId(pairId: string) {
   return zeroPadValue(toBeHex(BigInt(normalized)), 32);
 }
 
-function findLiveSpotPair(network: RuntimeNetwork, pairLabel: SpotPair) {
-  const pair = getMarketPairs(getNetworkConfig(network)).find(
+async function findLiveSpotPair(network: RuntimeNetwork, pairLabel: SpotPair) {
+  const pair = (await getNetworkMarkets(getNetworkConfig(network))).find(
     (pair) => pair.kind === 'spot' && pair.label === pairLabel,
   );
   if (!pair) {

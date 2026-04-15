@@ -1,5 +1,5 @@
 import { getNetworkConfig, type RuntimeNetwork } from '../config/networks';
-import { getMarketPairs, type PairKind } from './market-catalog';
+import { getNetworkMarkets, type PairKind } from './market-catalog';
 import {
   cancelPerpOrderLive,
   closePerpPositionLive,
@@ -59,8 +59,8 @@ export async function placeOrderTool(
   input: PlaceOrderInput & { passphrase?: string },
 ) {
   const network = input.network ?? 'deepx_devnet';
-  const livePair = asLivePerpPair(input.pair);
-  const liveSpotPair = asLiveSpotPair(input.pair);
+  const livePair = await asLivePerpPair(network, input.pair);
+  const liveSpotPair = await asLiveSpotPair(network, input.pair);
   const passphrase = resolveLivePassphrase(network, input.passphrase);
 
   if (livePair && input.confirm === true && passphrase) {
@@ -101,7 +101,7 @@ export async function cancelOrderTool(input: {
   confirm?: boolean;
 }) {
   const network = input.network ?? 'deepx_devnet';
-  const livePair = asLivePerpPair(input.pair);
+  const livePair = await asLivePerpPair(network, input.pair);
   if (livePair) {
     const passphrase = resolveLivePassphrase(network, input.passphrase);
     if (!passphrase) {
@@ -134,7 +134,7 @@ export async function closePositionTool(input: {
   confirm?: boolean;
 }) {
   const network = input.network ?? 'deepx_devnet';
-  const livePair = asLivePerpPair(input.pair);
+  const livePair = await asLivePerpPair(network, input.pair);
   if (livePair) {
     const passphrase = resolveLivePassphrase(network, input.passphrase);
     if (!passphrase) {
@@ -165,7 +165,7 @@ export async function updatePositionTool(input: {
   confirm?: boolean;
 }) {
   const network = input.network ?? 'deepx_devnet';
-  const livePair = asLivePerpPair(input.pair);
+  const livePair = await asLivePerpPair(network, input.pair);
   if (livePair) {
     const passphrase = resolveLivePassphrase(network, input.passphrase);
     if (!passphrase) {
@@ -192,8 +192,8 @@ export async function updatePositionTool(input: {
   return buildDryRunPositionUpdate(input);
 }
 
-export function listSupportedMarkets(network: RuntimeNetwork) {
-  return getMarketPairs(getNetworkConfig(network)).map((pair) => ({
+export async function listSupportedMarkets(network: RuntimeNetwork) {
+  return (await getNetworkMarkets(getNetworkConfig(network))).map((pair) => ({
     label: pair.label,
     kind: pair.kind,
     priceDecimals: pair.priceDecimal,
@@ -201,10 +201,12 @@ export function listSupportedMarkets(network: RuntimeNetwork) {
   }));
 }
 
-export function buildDryRunOrder(input: PlaceOrderInput): OrderToolResult {
+export async function buildDryRunOrder(
+  input: PlaceOrderInput,
+): Promise<OrderToolResult> {
   const network = input.network ?? 'deepx_devnet';
   const networkConfig = getNetworkConfig(network);
-  const pair = findPair(network, input.pair);
+  const pair = await findPair(network, input.pair);
   const side = normalizeSide(input.side);
   const type = normalizeType(input.type);
   const size = normalizeDecimal(input.size, pair.orderDecimal, 'size');
@@ -215,7 +217,7 @@ export function buildDryRunOrder(input: PlaceOrderInput): OrderToolResult {
   const tif = input.tif ?? 'GTC';
   const warnings = [
     'Dry-run only. No live order was submitted.',
-    'Wallet signing and exchange submission are not implemented in this repository yet.',
+    'Live submission requires the terminal Confirm action with an unlocked wallet session.',
   ];
 
   if (!input.confirm) {
@@ -260,15 +262,15 @@ export function listOpenOrdersDryRun(network: RuntimeNetwork) {
   };
 }
 
-export function buildDryRunClosePosition(input: {
+export async function buildDryRunClosePosition(input: {
   network?: RuntimeNetwork;
   pair: string;
   price: string | number;
   slippage?: string | number;
   confirm?: boolean;
-}): PositionToolResult {
+}): Promise<PositionToolResult> {
   const network = input.network ?? 'deepx_devnet';
-  const pair = findPair(network, input.pair);
+  const pair = await findPair(network, input.pair);
   const price = normalizeDecimal(input.price, pair.priceDecimal, 'price');
   const slippage = normalizeIntegerString(input.slippage, 'slippage', '10');
   const warnings = [
@@ -294,15 +296,15 @@ export function buildDryRunClosePosition(input: {
   };
 }
 
-export function buildDryRunPositionUpdate(input: {
+export async function buildDryRunPositionUpdate(input: {
   network?: RuntimeNetwork;
   pair: string;
   takeProfit?: string | number;
   stopLoss?: string | number;
   confirm?: boolean;
-}): PositionToolResult {
+}): Promise<PositionToolResult> {
   const network = input.network ?? 'deepx_devnet';
-  const pair = findPair(network, input.pair);
+  const pair = await findPair(network, input.pair);
   const takeProfit =
     input.takeProfit == null
       ? undefined
@@ -358,17 +360,17 @@ export function resolveLivePassphrase(
   return getRememberedWalletPassphrase(network);
 }
 
-function asLivePerpPair(pair: string) {
-  return listLivePerpPairs().find((item) => item === pair);
+async function asLivePerpPair(network: RuntimeNetwork, pair: string) {
+  return (await listLivePerpPairs(network)).find((item) => item === pair);
 }
 
-function asLiveSpotPair(pair: string) {
-  return listLiveSpotPairs().find((item) => item === pair);
+async function asLiveSpotPair(network: RuntimeNetwork, pair: string) {
+  return (await listLiveSpotPairs(network)).find((item) => item === pair);
 }
 
-function findPair(network: RuntimeNetwork, requestedPair: string) {
+async function findPair(network: RuntimeNetwork, requestedPair: string) {
   const normalized = requestedPair.trim().toUpperCase();
-  const pair = getMarketPairs(getNetworkConfig(network)).find(
+  const pair = (await getNetworkMarkets(getNetworkConfig(network))).find(
     (item) => item.label.toUpperCase() === normalized,
   );
 

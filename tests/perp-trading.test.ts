@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
 import { getNetworkConfig } from '../src/config/networks';
 import {
@@ -11,10 +11,22 @@ import {
   updatePerpPositionLive,
 } from '../src/services/perp-trading';
 import { getPrimarySubaccountFromUserStats } from '../src/services/subaccount-contract';
+import { installMockMarketApi } from './market-api-fixture';
+
+let restoreFetch: (() => void) | undefined;
+
+beforeEach(() => {
+  restoreFetch = installMockMarketApi();
+});
+
+afterEach(() => {
+  restoreFetch?.();
+  restoreFetch = undefined;
+});
 
 describe('perp trading config', () => {
-  test('exposes the live perp markets', () => {
-    expect(listLivePerpPairs()).toEqual(['ETH-USDC', 'SOL-USDC']);
+  test('exposes the live perp markets', async () => {
+    expect(await listLivePerpPairs()).toEqual(['ETH-USDC', 'SOL-USDC']);
   });
 
   test('network config exposes chain and explorer metadata', () => {

@@ -13,7 +13,7 @@ import {
 } from './deepx-api';
 import { logError, logSocketEvent } from './logger';
 import {
-  getMarketPairs,
+  getNetworkMarkets,
   getPairsByKind,
   type MarketPair,
   type PairKind,
@@ -74,10 +74,7 @@ export function useMarketData(input: {
   pairIndex: number;
   resolution: string;
 }): UseMarketDataState {
-  const allPairs = useMemo(
-    () => getMarketPairs(input.network),
-    [input.network],
-  );
+  const [allPairs, setAllPairs] = useState<MarketPair[]>([]);
   const pairGroups = useMemo(
     () => ({
       perp: getPairsByKind(allPairs, 'perp'),
@@ -90,6 +87,30 @@ export function useMarketData(input: {
     input.pairKind,
     input.pairIndex,
   );
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function loadMarkets() {
+      try {
+        const pairs = await getNetworkMarkets(input.network);
+        if (!isCancelled) {
+          setAllPairs(pairs);
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          logError('markets', 'Market load failed', String(error));
+          setAllPairs([]);
+        }
+      }
+    }
+
+    void loadMarkets();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [input.network]);
   const [overview, setOverview] = useState<Record<string, OverviewEntry>>({});
   const [candles, setCandles] = useState<CandleBar[]>([]);
   const [orderbook, setOrderbook] = useState<OrderBookState | null>(null);
@@ -110,6 +131,10 @@ export function useMarketData(input: {
   >();
 
   useEffect(() => {
+    if (allPairs.length === 0) {
+      return;
+    }
+
     const websocket = new WebSocket(input.network.marketWsUrl);
     let pendingPingAt: number | null = null;
     const subscribedPairs = allPairs.map((pair) => ({
@@ -247,6 +272,10 @@ export function useMarketData(input: {
   }, [allPairs, input.network.marketWsUrl]);
 
   useEffect(() => {
+    if (allPairs.length === 0) {
+      return;
+    }
+
     let isCancelled = false;
 
     async function loadCandles() {
@@ -274,9 +303,13 @@ export function useMarketData(input: {
     return () => {
       isCancelled = true;
     };
-  }, [currentPair, input.network, input.resolution]);
+  }, [allPairs.length, currentPair, input.network, input.resolution]);
 
   useEffect(() => {
+    if (allPairs.length === 0) {
+      return;
+    }
+
     setOrderbook(null);
     setTrades([]);
     setOrderbookError(undefined);
@@ -457,9 +490,18 @@ export function useMarketData(input: {
       clearInterval(heartbeat);
       websocket.close();
     };
-  }, [currentPair, input.network.marketWsUrl, input.resolution]);
+  }, [
+    allPairs.length,
+    currentPair,
+    input.network.marketWsUrl,
+    input.resolution,
+  ]);
 
   useEffect(() => {
+    if (allPairs.length === 0) {
+      return;
+    }
+
     const latestPrice = overview[currentPair.label]?.latestPrice;
     if (!Number.isFinite(latestPrice)) {
       return;
@@ -472,7 +514,7 @@ export function useMarketData(input: {
         input.resolution,
       ),
     );
-  }, [currentPair.label, input.resolution, overview]);
+  }, [allPairs.length, currentPair.label, input.resolution, overview]);
 
   return {
     pairGroups,
@@ -512,7 +554,16 @@ function getCurrentPair(
 ): MarketPair {
   const pair = pairGroups[pairKind][pairIndex] ?? pairGroups[pairKind][0];
   if (!pair) {
-    throw new Error(`No pairs configured for ${pairKind}`);
+    return {
+      kind: pairKind,
+      label: pairKind === 'perp' ? 'LOADING-USDC' : 'LOADING/USDC',
+      pairId: '',
+      priceDecimal: 2,
+      orderDecimal: 3,
+      baseDecimals: 18,
+      baseSymbol: 'LOADING',
+      quoteSymbol: 'USDC',
+    };
   }
 
   return pair;

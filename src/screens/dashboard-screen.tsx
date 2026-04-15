@@ -23,17 +23,25 @@ import {
   type ShellCommand,
 } from '../lib/dashboard-input';
 import { formatErrorMessage } from '../lib/error-format';
-import { requestAgentChat } from '../services/agent-chat';
 import {
-  buildTradeIntentConfirmationMessage,
+  type AgentContinuation,
+  type AgentStagedOrder,
+  buildCancelledAgentActionResult,
+  continueAgentChatAfterUserAction,
+  executeConfirmedAgentAction,
+  type PendingAgentAction,
+  requestAgentChatWithActions,
+} from '../services/agent-chat';
+import {
+  isTradeCancellationMessage,
   isTradeConfirmationMessage,
   type ParsedChatTradeIntent,
-  parseChatTradeIntent,
 } from '../services/chat-trade-intent';
 import { logError, logInfo } from '../services/logger';
 import type { MarketPair, PairKind } from '../services/market-catalog';
 import { placeOrderTool } from '../services/order-tools';
 import { useMarketData } from '../services/use-market-data';
+import { getRememberedWalletPassphrase } from '../services/wallet-session';
 import { buildHelpLines, HelpContent } from './help-screen';
 
 type DashboardScreenProps = {
@@ -55,6 +63,8 @@ type DashboardLayoutSlotsInput = {
   shellMode: ShellMode;
   pendingCommand?: Exclude<ShellCommand, 'help'>;
   isCommandPaletteVisible: boolean;
+  hasPendingTransactionConfirmation: boolean;
+  hasPendingAgentAction: boolean;
   outputView: OutputView;
 };
 
@@ -62,6 +72,8 @@ type DashboardLayoutSlots = {
   showPairPicker: boolean;
   showOutputView: boolean;
   showCommandPaletteBelowInput: boolean;
+  showTransactionConfirmationBelowInput: boolean;
+  showAgentActionBelowInput: boolean;
 };
 
 const UP_COLOR = '#28DE9C';
@@ -75,8 +87,24 @@ const WELCOME_LOGO_IDLE_COLOR = '#0F5C41';
 const WELCOME_LOGO_GUIDE_COLOR = '#335C4D';
 const WELCOME_LOGO_ANIMATION_INTERVAL_MS = 30;
 const WELCOME_LOGO_BLINK_FRAMES = 4;
+const CHAT_LOADING_ANIMATION_INTERVAL_MS = 80;
 const COMMAND_TEXT_COLOR = 'gray';
 const COMMAND_HIGHLIGHT_COLOR = '#AAB6FF';
+const TRANSACTION_CONFIRMATION_ITEMS = [
+  {
+    action: 'confirm',
+    label: 'Confirm',
+    description: 'send transaction',
+  },
+  {
+    action: 'cancel',
+    label: 'Cancel',
+    description: 'keep staged only',
+  },
+] as const;
+type TransactionConfirmationAction =
+  (typeof TRANSACTION_CONFIRMATION_ITEMS)[number]['action'];
+type AgentActionInputMode = 'selector' | 'passphrase';
 export const WELCOME_LOGO_LINES = [
   { key: 'logo-1', line: '● ● ● ● ● ● · · · · ● ● ● ● ● ●' },
   { key: 'logo-2', line: '· · ● ● ● ● ● · · ● ● ● ● ● · ·' },
@@ -178,12 +206,25 @@ export function getDashboardLayoutSlots(
     showOutputView: input.outputView.kind !== 'empty',
     showCommandPaletteBelowInput:
       !showPairPicker && input.isCommandPaletteVisible,
+    showTransactionConfirmationBelowInput:
+      !showPairPicker &&
+      !input.isCommandPaletteVisible &&
+      !input.hasPendingAgentAction &&
+      input.hasPendingTransactionConfirmation,
+    showAgentActionBelowInput:
+      !showPairPicker &&
+      !input.isCommandPaletteVisible &&
+      input.hasPendingAgentAction,
   };
 }
 
 export function getWorkspaceHeight(terminalRows?: number) {
   const resolvedRows = terminalRows ?? 40;
   return Math.max(resolvedRows - 18, 22);
+}
+
+export function getInitialOutputView(_mode: 'default' | 'debug'): OutputView {
+  return { kind: 'empty' };
 }
 
 export const DashboardScreen: FC<DashboardScreenProps> = ({
@@ -202,12 +243,24 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
   const [pendingCommand, setPendingCommand] = useState<
     Exclude<ShellCommand, 'help'> | undefined
   >();
-  const [outputView, setOutputView] = useState<OutputView>({ kind: 'empty' });
+  const [outputView, setOutputView] = useState<OutputView>(() =>
+    getInitialOutputView(mode),
+  );
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => []);
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [chatLoadingFrame, setChatLoadingFrame] = useState(0);
   const [pendingChatTrade, setPendingChatTrade] =
     useState<ParsedChatTradeIntent>();
+  const [transactionConfirmationIndex, setTransactionConfirmationIndex] =
+    useState(0);
+  const [pendingAgentAction, setPendingAgentAction] =
+    useState<PendingAgentAction>();
+  const [pendingAgentContinuation, setPendingAgentContinuation] =
+    useState<AgentContinuation>();
+  const [agentActionSelectionIndex, setAgentActionSelectionIndex] = useState(0);
+  const [agentActionInputMode, setAgentActionInputMode] =
+    useState<AgentActionInputMode>('selector');
+  const [agentActionPassphrase, setAgentActionPassphrase] = useState('');
 
   const {
     pairGroups,
@@ -254,6 +307,17 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     shellMode === 'chat' &&
     isSlashCommandInput(inputValue) &&
     commandPaletteItems.length > 0;
+  const isTransactionConfirmationVisible =
+    shellMode === 'chat' &&
+    Boolean(pendingChatTrade) &&
+    !isCommandPaletteVisible &&
+    !pendingAgentAction &&
+    !isChatLoading;
+  const isAgentActionVisible =
+    shellMode === 'chat' &&
+    Boolean(pendingAgentAction) &&
+    !isCommandPaletteVisible &&
+    !isChatLoading;
 
   useEffect(() => {
     if (!isChatLoading) {
@@ -263,7 +327,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
 
     const timer = setInterval(() => {
       setChatLoadingFrame((value) => value + 1);
-    }, 200);
+    }, CHAT_LOADING_ANIMATION_INTERVAL_MS);
 
     return () => clearInterval(timer);
   }, [isChatLoading]);
@@ -352,6 +416,98 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       }
     }
 
+    if (isAgentActionVisible) {
+      if (agentActionInputMode === 'passphrase') {
+        if (key.return) {
+          void submitPendingAgentAction('confirm');
+          return;
+        }
+
+        if (key.escape) {
+          void submitPendingAgentAction('cancel');
+          return;
+        }
+
+        if (key.backspace || key.delete) {
+          setAgentActionPassphrase((value) => value.slice(0, -1));
+          return;
+        }
+
+        if (!key.ctrl && !key.meta && input.length > 0) {
+          setAgentActionPassphrase((value) => `${value}${input}`);
+          return;
+        }
+
+        return;
+      }
+
+      if (key.leftArrow || key.upArrow) {
+        setAgentActionSelectionIndex((current) =>
+          moveSelectionIndex(
+            current,
+            TRANSACTION_CONFIRMATION_ITEMS.length,
+            -1,
+          ),
+        );
+        return;
+      }
+
+      if (key.rightArrow || key.downArrow) {
+        setAgentActionSelectionIndex((current) =>
+          moveSelectionIndex(current, TRANSACTION_CONFIRMATION_ITEMS.length, 1),
+        );
+        return;
+      }
+
+      if (key.return && inputValue.trim().length === 0) {
+        const selectedItem =
+          TRANSACTION_CONFIRMATION_ITEMS[agentActionSelectionIndex];
+        if (selectedItem) {
+          void submitPendingAgentAction(selectedItem.action);
+        }
+        return;
+      }
+
+      if (key.escape && inputValue.trim().length === 0) {
+        void submitPendingAgentAction('cancel');
+        return;
+      }
+    }
+
+    if (isTransactionConfirmationVisible) {
+      if (key.leftArrow || key.upArrow) {
+        setTransactionConfirmationIndex((current) =>
+          moveSelectionIndex(
+            current,
+            TRANSACTION_CONFIRMATION_ITEMS.length,
+            -1,
+          ),
+        );
+        return;
+      }
+
+      if (key.rightArrow || key.downArrow) {
+        setTransactionConfirmationIndex((current) =>
+          moveSelectionIndex(current, TRANSACTION_CONFIRMATION_ITEMS.length, 1),
+        );
+        return;
+      }
+
+      if (key.return && inputValue.trim().length === 0) {
+        const selectedItem =
+          TRANSACTION_CONFIRMATION_ITEMS[transactionConfirmationIndex];
+        if (selectedItem) {
+          void submitTransactionConfirmation(selectedItem.action);
+        }
+        return;
+      }
+
+      if (key.escape && inputValue.trim().length === 0) {
+        void submitTransactionConfirmation('cancel');
+        return;
+      }
+    }
+
     if (key.return) {
       void handleSubmit();
       return;
@@ -407,59 +563,58 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
 
     try {
       if (pendingChatTrade && isTradeConfirmationMessage(content)) {
-        logInfo(
-          'chat-trade',
-          'Submitting staged order',
-          `${pendingChatTrade.side} ${pendingChatTrade.size} ${pendingChatTrade.pair} ${pendingChatTrade.type}`,
-        );
-        const result = await placeOrderTool({
-          network: network.id,
-          pair: pendingChatTrade.pair,
-          side: pendingChatTrade.side,
-          type: pendingChatTrade.type,
-          size: pendingChatTrade.size,
-          price: pendingChatTrade.price,
-          confirm: true,
-        });
+        await submitPendingChatTrade(pendingChatTrade);
+        return;
+      }
+
+      if (pendingChatTrade && isTradeCancellationMessage(content)) {
         setPendingChatTrade(undefined);
+        setTransactionConfirmationIndex(0);
         setChatMessages((messages) =>
-          appendChatMessage(messages, 'assistant', result.summary),
+          appendChatMessage(messages, 'assistant', 'Transaction cancelled.'),
         );
         return;
       }
 
-      const tradeIntent = parseChatTradeIntent({
-        message: content,
-        currentPair: currentPair.label,
-      });
-      if (tradeIntent) {
-        setPendingChatTrade(tradeIntent);
-        setChatMessages((messages) =>
-          appendChatMessage(
-            messages,
-            'assistant',
-            buildTradeIntentConfirmationMessage({
-              intent: tradeIntent,
-              networkLabel: network.label,
-              priceLabel,
-            }),
-          ),
-        );
-        return;
-      }
-
-      const reply = await requestAgentChat({
+      const agentResult = await requestAgentChatWithActions({
         messages: nextMessages,
         context: {
+          network: network.id,
           pairLabel: currentPair.label,
           priceLabel,
           resolutionLabel,
           walletUnlocked,
         },
       });
+      if (agentResult.kind === 'needs_user_action') {
+        setPendingAgentAction(agentResult.action);
+        setPendingAgentContinuation(agentResult.continuation);
+        setAgentActionSelectionIndex(0);
+        setAgentActionInputMode('selector');
+        setAgentActionPassphrase('');
+        setChatMessages((messages) =>
+          appendChatMessage(
+            messages,
+            'assistant',
+            [
+              agentResult.action.title,
+              ...agentResult.action.summaryLines,
+              'Choose Confirm or Cancel below the input bar.',
+            ].join('\n'),
+          ),
+        );
+        return;
+      }
+
       setChatMessages((messages) =>
-        appendChatMessage(messages, 'assistant', reply),
+        appendChatMessage(messages, 'assistant', agentResult.reply),
       );
+      if (agentResult.stagedOrder) {
+        setPendingChatTrade(
+          buildChatTradeIntentFromAgentOrder(agentResult.stagedOrder),
+        );
+        setTransactionConfirmationIndex(0);
+      }
     } catch (error) {
       logError('shell', 'Chat submit failed', formatErrorMessage(error));
       setChatMessages((messages) =>
@@ -472,6 +627,162 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
         ),
       );
       setPendingChatTrade(undefined);
+      setTransactionConfirmationIndex(0);
+    } finally {
+      setIsChatLoading(false);
+    }
+  }
+
+  async function submitTransactionConfirmation(
+    action: TransactionConfirmationAction,
+  ) {
+    if (!pendingChatTrade || isChatLoading) {
+      return;
+    }
+
+    const content = action === 'confirm' ? 'Confirm' : 'Cancel';
+    const nextMessages = appendChatMessage(chatMessages, 'user', content);
+    setInputValue('');
+    setChatMessages(nextMessages);
+
+    if (action === 'cancel') {
+      setPendingChatTrade(undefined);
+      setTransactionConfirmationIndex(0);
+      setChatMessages((messages) =>
+        appendChatMessage(messages, 'assistant', 'Transaction cancelled.'),
+      );
+      return;
+    }
+
+    setIsChatLoading(true);
+    await submitPendingChatTrade(pendingChatTrade);
+  }
+
+  async function submitPendingAgentAction(
+    action: TransactionConfirmationAction,
+  ) {
+    if (!pendingAgentAction || !pendingAgentContinuation || isChatLoading) {
+      return;
+    }
+
+    if (action === 'confirm') {
+      const sessionPassphrase = getRememberedWalletPassphrase(network.id);
+      if (
+        pendingAgentAction.requiresPassphrase &&
+        !sessionPassphrase &&
+        agentActionInputMode !== 'passphrase'
+      ) {
+        setAgentActionInputMode('passphrase');
+        setAgentActionPassphrase('');
+        return;
+      }
+    }
+
+    const userContent = action === 'confirm' ? 'Confirm' : 'Cancel';
+    setInputValue('');
+    setChatMessages((messages) =>
+      appendChatMessage(messages, 'user', userContent),
+    );
+    setIsChatLoading(true);
+
+    try {
+      const actionResult =
+        action === 'confirm'
+          ? await executeConfirmedAgentAction({
+              action: pendingAgentAction,
+              defaultNetwork: network.id,
+              passphrase:
+                getRememberedWalletPassphrase(network.id) ??
+                agentActionPassphrase.trim(),
+            })
+          : buildCancelledAgentActionResult(pendingAgentAction);
+      const agentResult = await continueAgentChatAfterUserAction({
+        continuation: pendingAgentContinuation,
+        actionResult,
+      });
+      clearPendingAgentAction();
+
+      if (agentResult.kind === 'needs_user_action') {
+        setPendingAgentAction(agentResult.action);
+        setPendingAgentContinuation(agentResult.continuation);
+        setChatMessages((messages) =>
+          appendChatMessage(
+            messages,
+            'assistant',
+            [
+              agentResult.action.title,
+              ...agentResult.action.summaryLines,
+              'Choose Confirm or Cancel below the input bar.',
+            ].join('\n'),
+          ),
+        );
+        return;
+      }
+
+      setChatMessages((messages) =>
+        appendChatMessage(messages, 'assistant', agentResult.reply),
+      );
+      if (agentResult.stagedOrder) {
+        setPendingChatTrade(
+          buildChatTradeIntentFromAgentOrder(agentResult.stagedOrder),
+        );
+        setTransactionConfirmationIndex(0);
+      }
+    } catch (error) {
+      logError('shell', 'Agent action failed', formatErrorMessage(error));
+      clearPendingAgentAction();
+      setChatMessages((messages) =>
+        appendChatMessage(
+          messages,
+          'assistant',
+          `Agent error: ${formatErrorMessage(error)}`,
+        ),
+      );
+    } finally {
+      setIsChatLoading(false);
+    }
+  }
+
+  function clearPendingAgentAction() {
+    setPendingAgentAction(undefined);
+    setPendingAgentContinuation(undefined);
+    setAgentActionSelectionIndex(0);
+    setAgentActionInputMode('selector');
+    setAgentActionPassphrase('');
+  }
+
+  async function submitPendingChatTrade(trade: ParsedChatTradeIntent) {
+    try {
+      logInfo(
+        'chat-trade',
+        'Submitting staged order',
+        `${trade.side} ${trade.size} ${trade.pair} ${trade.type}`,
+      );
+      const result = await placeOrderTool({
+        network: network.id,
+        pair: trade.pair,
+        side: trade.side,
+        type: trade.type,
+        size: trade.size,
+        price: trade.price,
+        confirm: true,
+      });
+      setPendingChatTrade(undefined);
+      setTransactionConfirmationIndex(0);
+      setChatMessages((messages) =>
+        appendChatMessage(messages, 'assistant', result.summary),
+      );
+    } catch (error) {
+      logError('shell', 'Chat trade submit failed', formatErrorMessage(error));
+      setPendingChatTrade(undefined);
+      setTransactionConfirmationIndex(0);
+      setChatMessages((messages) =>
+        appendChatMessage(
+          messages,
+          'assistant',
+          `Order failed: ${formatErrorMessage(error)}`,
+        ),
+      );
     } finally {
       setIsChatLoading(false);
     }
@@ -512,6 +823,8 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     shellMode,
     pendingCommand,
     isCommandPaletteVisible,
+    hasPendingTransactionConfirmation: isTransactionConfirmationVisible,
+    hasPendingAgentAction: isAgentActionVisible,
     outputView,
   });
 
@@ -598,6 +911,26 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
           <CommandPalette
             items={commandPaletteItems}
             selectedIndex={commandPaletteIndex}
+          />
+        </Section>
+      ) : null}
+
+      {layoutSlots.showTransactionConfirmationBelowInput ? (
+        <Section title="Transaction">
+          <TransactionConfirmationSelector
+            items={TRANSACTION_CONFIRMATION_ITEMS}
+            selectedIndex={transactionConfirmationIndex}
+          />
+        </Section>
+      ) : null}
+
+      {layoutSlots.showAgentActionBelowInput && pendingAgentAction ? (
+        <Section title="Agent Action">
+          <AgentActionPanel
+            action={pendingAgentAction}
+            mode={agentActionInputMode}
+            passphraseValue={agentActionPassphrase}
+            selectedIndex={agentActionSelectionIndex}
           />
         </Section>
       ) : null}
@@ -784,6 +1117,94 @@ const CommandPalette: FC<CommandPaletteProps> = ({ items, selectedIndex }) => {
   );
 };
 
+type TransactionConfirmationSelectorProps = {
+  items: typeof TRANSACTION_CONFIRMATION_ITEMS;
+  selectedIndex: number;
+};
+
+const TransactionConfirmationSelector: FC<
+  TransactionConfirmationSelectorProps
+> = ({ items, selectedIndex }) => {
+  return (
+    <Box flexDirection="column">
+      <Box>
+        {items.map((item, index) => (
+          <Text
+            key={item.action}
+            color={index === selectedIndex ? 'black' : 'white'}
+            backgroundColor={index === selectedIndex ? 'yellow' : undefined}
+          >
+            {`${index === selectedIndex ? '>' : ' '} ${item.label}  `}
+          </Text>
+        ))}
+      </Box>
+      <Text color="gray">
+        {
+          'Left/Right move. Enter selects. Esc cancels. Typing confirm or cancel still works.'
+        }
+      </Text>
+    </Box>
+  );
+};
+
+type AgentActionPanelProps = {
+  action: PendingAgentAction;
+  mode: AgentActionInputMode;
+  passphraseValue: string;
+  selectedIndex: number;
+};
+
+const AgentActionPanel: FC<AgentActionPanelProps> = ({
+  action,
+  mode,
+  passphraseValue,
+  selectedIndex,
+}) => {
+  if (mode === 'passphrase') {
+    return (
+      <Box flexDirection="column">
+        <Text color="white">{action.title}</Text>
+        {action.summaryLines.map((line) => (
+          <Text key={line} color="gray">
+            {line}
+          </Text>
+        ))}
+        <Text color="yellow">{`> ${'*'.repeat(passphraseValue.length)}█`}</Text>
+        <Text color="gray">
+          Enter submits with this passphrase. Esc cancels.
+        </Text>
+      </Box>
+    );
+  }
+
+  return (
+    <Box flexDirection="column">
+      <Text color="white">{action.title}</Text>
+      {action.summaryLines.map((line) => (
+        <Text key={line} color="gray">
+          {line}
+        </Text>
+      ))}
+      <Box>
+        {TRANSACTION_CONFIRMATION_ITEMS.map((item, index) => (
+          <Text
+            key={item.action}
+            color={index === selectedIndex ? 'black' : 'white'}
+            backgroundColor={index === selectedIndex ? 'yellow' : undefined}
+          >
+            {`${index === selectedIndex ? '>' : ' '} ${
+              item.action === 'confirm'
+                ? action.confirmLabel
+                : action.cancelLabel
+            }  `}
+          </Text>
+        ))}
+      </Box>
+      <Text color="gray">Left/Right move. Enter selects. Esc cancels.</Text>
+    </Box>
+  );
+};
+
 function renderOutputView(input: {
   outputView: OutputView;
   currentPair: MarketPair;
@@ -874,6 +1295,19 @@ function rotateResolution(current: string, direction: -1 | 1) {
   const nextIndex =
     (currentIndex + direction + resolutions.length) % resolutions.length;
   return resolutions[nextIndex] ?? '15';
+}
+
+function buildChatTradeIntentFromAgentOrder(
+  order: AgentStagedOrder,
+): ParsedChatTradeIntent {
+  return {
+    pair: order.pair,
+    side: order.side,
+    type: order.type,
+    size: order.size,
+    price: order.type === 'LIMIT' ? order.price : undefined,
+    baseAsset: order.pair.split(/[-/]/)[0]?.trim().toUpperCase() ?? '',
+  };
 }
 
 export function getCommandMessageSegments(content: string) {

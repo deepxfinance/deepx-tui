@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
 import {
   fetchUserBalance,
@@ -6,6 +6,18 @@ import {
   listUserSubaccountsTool,
   SUBACCOUNT_ABI,
 } from '../src/services/user-balance';
+import { installMockMarketApi } from './market-api-fixture';
+
+let restoreFetch: (() => void) | undefined;
+
+beforeEach(() => {
+  restoreFetch = installMockMarketApi();
+});
+
+afterEach(() => {
+  restoreFetch?.();
+  restoreFetch = undefined;
+});
 
 describe('user balance tool', () => {
   const walletRecord = {

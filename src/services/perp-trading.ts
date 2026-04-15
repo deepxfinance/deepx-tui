@@ -1,8 +1,12 @@
-import { Contract, JsonRpcProvider, parseUnits, Wallet } from 'ethers';
+import { Contract, parseUnits, Wallet } from 'ethers';
 
 import { getNetworkConfig, type RuntimeNetwork } from '../config/networks';
+import { getNetworkMarkets } from './market-catalog';
 import { resolvePrimarySubaccountAddress } from './subaccount-contract';
-import { submitRpcTransaction } from './transaction-submission';
+import {
+  createRpcProvider,
+  submitRpcTransaction,
+} from './transaction-submission';
 
 export {
   formatRpcFailureMessage,
@@ -63,29 +67,6 @@ type UpdatePerpPositionInput = {
   confirm: boolean;
 };
 
-const perpMarkets = {
-  'ETH-USDC': {
-    marketId: 3,
-    baseDecimals: 18,
-    priceDecimals: 6,
-    orderDecimals: 3,
-  },
-  'SOL-USDC': {
-    marketId: 4,
-    baseDecimals: 9,
-    priceDecimals: 6,
-    orderDecimals: 2,
-  },
-} as const satisfies Record<
-  PerpPair,
-  {
-    marketId: number;
-    baseDecimals: number;
-    priceDecimals: number;
-    orderDecimals: number;
-  }
->;
-
 export async function placePerpOrderLive(input: PlacePerpOrderInput): Promise<{
   status: 'submitted';
   network: RuntimeNetwork;
@@ -107,13 +88,13 @@ export async function placePerpOrderLive(input: PlacePerpOrderInput): Promise<{
   }
 
   const privateKey = decryptPrivateKey(walletRecord.crypto, input.passphrase);
-  const provider = new JsonRpcProvider(network.rpcUrl);
+  const provider = createRpcProvider(network);
   const signer = new Wallet(privateKey, provider);
   const subaccountAddress = await resolvePrimarySubaccountAddress({
     walletAddress: walletRecord.address,
     provider,
   });
-  const market = perpMarkets[input.pair];
+  const market = await findLivePerpMarket(networkId, input.pair);
   const contract = new Contract(PERP_CONTRACT_ADDRESS, PERP_ABI, signer);
 
   const size = parsePositiveDecimal(input.size, market.baseDecimals, 'size');
@@ -225,13 +206,13 @@ export async function cancelPerpOrderLive(
   }
 
   const privateKey = decryptPrivateKey(walletRecord.crypto, input.passphrase);
-  const provider = new JsonRpcProvider(network.rpcUrl);
+  const provider = createRpcProvider(network);
   const signer = new Wallet(privateKey, provider);
   const subaccountAddress = await resolvePrimarySubaccountAddress({
     walletAddress: walletRecord.address,
     provider,
   });
-  const market = perpMarkets[input.pair];
+  const market = await findLivePerpMarket(networkId, input.pair);
   const contract = new Contract(PERP_CONTRACT_ADDRESS, PERP_ABI, signer);
   // biome-ignore lint/complexity/useDateNow: DeepX transaction nonces use Date valueOf for backend compatibility.
   const nonce = new Date().valueOf();
@@ -285,13 +266,13 @@ export async function closePerpPositionLive(
   }
 
   const privateKey = decryptPrivateKey(walletRecord.crypto, input.passphrase);
-  const provider = new JsonRpcProvider(network.rpcUrl);
+  const provider = createRpcProvider(network);
   const signer = new Wallet(privateKey, provider);
   const subaccountAddress = await resolvePrimarySubaccountAddress({
     walletAddress: walletRecord.address,
     provider,
   });
-  const market = perpMarkets[input.pair];
+  const market = await findLivePerpMarket(networkId, input.pair);
   const contract = new Contract(PERP_CONTRACT_ADDRESS, PERP_ABI, signer);
   // biome-ignore lint/complexity/useDateNow: DeepX transaction nonces use Date valueOf for backend compatibility.
   const nonce = new Date().valueOf();
@@ -350,13 +331,13 @@ export async function updatePerpPositionLive(
   }
 
   const privateKey = decryptPrivateKey(walletRecord.crypto, input.passphrase);
-  const provider = new JsonRpcProvider(network.rpcUrl);
+  const provider = createRpcProvider(network);
   const signer = new Wallet(privateKey, provider);
   const subaccountAddress = await resolvePrimarySubaccountAddress({
     walletAddress: walletRecord.address,
     provider,
   });
-  const market = perpMarkets[input.pair];
+  const market = await findLivePerpMarket(networkId, input.pair);
   const contract = new Contract(PERP_CONTRACT_ADDRESS, PERP_ABI, signer);
   // biome-ignore lint/complexity/useDateNow: DeepX transaction nonces use Date valueOf for backend compatibility.
   const nonce = new Date().valueOf();
@@ -397,8 +378,33 @@ export async function updatePerpPositionLive(
   };
 }
 
-export function listLivePerpPairs(): PerpPair[] {
-  return Object.keys(perpMarkets) as PerpPair[];
+export async function listLivePerpPairs(
+  network: RuntimeNetwork = 'deepx_devnet',
+): Promise<PerpPair[]> {
+  return (await getNetworkMarkets(getNetworkConfig(network)))
+    .filter((pair) => pair.kind === 'perp')
+    .map((pair) => pair.label as PerpPair);
+}
+
+async function findLivePerpMarket(
+  network: RuntimeNetwork,
+  pairLabel: PerpPair,
+) {
+  const pair = (await getNetworkMarkets(getNetworkConfig(network))).find(
+    (candidate) => candidate.kind === 'perp' && candidate.label === pairLabel,
+  );
+  if (!pair || pair.marketId == null) {
+    throw new Error(
+      `Unsupported live perp pair "${pairLabel}" for ${network}.`,
+    );
+  }
+
+  return {
+    marketId: pair.marketId,
+    baseDecimals: pair.baseDecimals,
+    priceDecimals: pair.quoteDecimals ?? 6,
+    orderDecimals: pair.orderDecimal,
+  };
 }
 
 function normalizeLeverage(value?: number): number {

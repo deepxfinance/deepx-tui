@@ -1,9 +1,21 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
 import {
   DEEPX_AGENT_TOOL_NAMES,
   executeDeepxAgentTool,
 } from '../src/services/agent-tools';
+import { installMockMarketApi } from './market-api-fixture';
+
+let restoreFetch: (() => void) | undefined;
+
+beforeEach(() => {
+  restoreFetch = installMockMarketApi();
+});
+
+afterEach(() => {
+  restoreFetch?.();
+  restoreFetch = undefined;
+});
 
 describe('agent tools', () => {
   test('exposes current supported tool names', () => {
@@ -11,6 +23,7 @@ describe('agent tools', () => {
       'deepx_list_markets',
       'deepx_get_user_balance',
       'deepx_list_subaccounts',
+      'deepx_create_subaccount',
       'deepx_place_order',
       'deepx_cancel_order',
       'deepx_list_open_orders',
@@ -24,7 +37,7 @@ describe('agent tools', () => {
       network: 'deepx_devnet',
     });
 
-    expect(result).toEqual({
+    expect(result as Record<string, unknown>).toEqual({
       network: 'deepx_devnet',
       orders: [],
       summary:
@@ -69,6 +82,80 @@ describe('agent tools', () => {
       network: 'deepx_testnet',
       walletAddress: '0xabc',
       summary: 'stubbed balance',
+    });
+  });
+
+  test('normalizes network aliases for tool execution', async () => {
+    const result = await executeDeepxAgentTool(
+      'deepx_get_user_balance',
+      {
+        network: 'testnet',
+      },
+      {
+        getUserBalance: async ({ network } = {}) => ({
+          status: 'success',
+          network: network ?? 'deepx_devnet',
+          walletAddress: '0xabc',
+          subaccountAddress: '0xabc',
+          netValue: '10.0',
+          netValueDisplay: '$10.00',
+          totalValue: '12.0',
+          totalValueDisplay: '$12.00',
+          totalDeposits: '15.0',
+          totalDepositsDisplay: '$15.00',
+          totalBorrowed: '3.0',
+          totalBorrowedDisplay: '$3.00',
+          totalUnrealizedPnl: '0.0',
+          totalUnrealizedPnlDisplay: '$0.00',
+          marginRatio: '-1',
+          totalCollateral: '15.0',
+          totalMarginRequired: '5.0',
+          totalMaintenanceMarginRequired: '0.0',
+          assets: [],
+          summary: 'stubbed balance',
+        }),
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: 'success',
+      network: 'deepx_testnet',
+      walletAddress: '0xabc',
+      summary: 'stubbed balance',
+    });
+  });
+
+  test('normalizes beta_testnet for live action gating', async () => {
+    const result = await executeDeepxAgentTool('deepx_cancel_order', {
+      network: 'beta_testnet',
+      pair: 'ETH-USDC',
+      orderId: 42,
+    });
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      network: 'deepx_testnet',
+      pair: 'ETH-USDC',
+      orderId: 42,
+      summary:
+        'Live order cancellation is disabled in AI chat for order 42 on ETH-USDC.',
+    });
+  });
+
+  test('uses the provided default network when tool args omit network', async () => {
+    const result = await executeDeepxAgentTool(
+      'deepx_list_open_orders',
+      {},
+      {
+        defaultNetwork: 'deepx_testnet',
+      },
+    );
+
+    expect(result as Record<string, unknown>).toEqual({
+      network: 'deepx_testnet',
+      orders: [],
+      summary:
+        'Open orders are unavailable in dry-run mode because live account queries are not implemented yet.',
     });
   });
 
@@ -120,7 +207,57 @@ describe('agent tools', () => {
     ).rejects.toThrowError('Unknown tool "deepx_unknown".');
   });
 
-  test('blocks live placement requests in AI chat mode', async () => {
+  test('routes subaccount creation through the create subaccount tool', async () => {
+    const result = await executeDeepxAgentTool(
+      'deepx_create_subaccount',
+      {
+        network: 'deepx_testnet',
+        name: 'main',
+      },
+      {
+        createSubaccount: async ({ network, name }) => ({
+          status: 'dry_run',
+          network: network ?? 'deepx_devnet',
+          name,
+          explorerUrl: 'https://example.test/tx',
+          warnings: [],
+          summary: 'stubbed subaccount creation',
+        }),
+      },
+    );
+
+    expect(result as Record<string, unknown>).toEqual({
+      status: 'dry_run',
+      network: 'deepx_testnet',
+      name: 'main',
+      explorerUrl: 'https://example.test/tx',
+      warnings: [],
+      summary: 'stubbed subaccount creation',
+    });
+  });
+
+  test('blocks live subaccount creation requests in AI chat mode', async () => {
+    const result = await executeDeepxAgentTool('deepx_create_subaccount', {
+      network: 'deepx_devnet',
+      name: 'main',
+      confirm: true,
+    });
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      network: 'deepx_devnet',
+      pair: undefined,
+      orderId: undefined,
+      summary:
+        'Live subaccount creation is disabled in AI chat for the local wallet.',
+      warnings: [
+        'AI chat is advisory-only for live account-management actions.',
+        'Use an explicit account workflow for any live subaccount creation.',
+      ],
+    });
+  });
+
+  test('stages live placement requests as dry runs in AI chat mode', async () => {
     const result = await executeDeepxAgentTool('deepx_place_order', {
       network: 'deepx_devnet',
       pair: 'ETH-USDC',
@@ -132,14 +269,17 @@ describe('agent tools', () => {
     });
 
     expect(result).toMatchObject({
-      status: 'blocked',
+      status: 'dry_run',
       network: 'deepx_devnet',
       pair: 'ETH-USDC',
-      orderId: undefined,
-      summary: 'Live order placement is disabled in AI chat for ETH-USDC.',
+      side: 'BUY',
+      type: 'LIMIT',
+      size: '1.000',
+      price: '1000.00',
       warnings: [
-        'AI chat is advisory-only for trading actions.',
-        'Use an explicit order-entry workflow for any live submission or cancellation.',
+        'Confirmation flag was not set. Treat this as a planning ticket only.',
+        'Dry-run only. No live order was submitted.',
+        'Live submission requires the terminal Confirm action with an unlocked wallet session.',
       ],
     });
   });

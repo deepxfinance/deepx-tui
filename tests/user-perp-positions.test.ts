@@ -1,19 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import { parseUnits } from 'ethers';
 
-import { getNetworkConfig } from '../src/config/networks';
-import { getMarketPairs } from '../src/services/market-catalog';
 import {
   buildPositionPanelRows,
   mergePerpPositions,
   type PerpPosition,
   parseUserPerpPositionsMessage,
 } from '../src/services/user-perp-positions';
+import { MOCK_NETWORK_MARKETS } from './market-api-fixture';
 
 const walletAddress = '0x1234000000000000000000000000000000005678';
-const perpPairs = getMarketPairs(getNetworkConfig('devnet')).filter(
-  (pair) => pair.kind === 'perp',
-);
+const perpPairs = MOCK_NETWORK_MARKETS.filter((pair) => pair.kind === 'perp');
 
 describe('parseUserPerpPositionsMessage', () => {
   test('maps websocket payloads into normalized perp positions', () => {

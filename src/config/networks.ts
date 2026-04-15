@@ -39,7 +39,7 @@ const networkConfigs: Record<RuntimeNetwork, NetworkConfig> = {
     chainId: 4846,
     rpcUrl: 'https://rpc-testnet.deepx.fi',
     appUrl: 'https://testnet.deepx.fi',
-    explorerUrl: 'https://explorer-testnet.deepx.fi',
+    explorerUrl: 'https://testnet-scan.deepx.fi',
     apiBaseUrl: 'https://testnet-api.deepx.fi',
     marketWsUrl: 'wss://testnet-api.deepx.fi/v2/ws',
   },

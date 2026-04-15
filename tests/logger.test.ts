@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import {
   clearLogs,
   filterLogEntries,
+  getDebugLogFilePath,
   getLogEntries,
   logError,
   logInfo,
@@ -15,6 +19,7 @@ describe('logger', () => {
   afterEach(() => {
     setLoggerMode('default');
     clearLogs();
+    delete process.env.DEEPX_DEBUG_LOG_FILE;
   });
 
   test('stores structured log entries', () => {
@@ -86,5 +91,48 @@ describe('logger', () => {
     expect(getLogEntries()[0]?.details).toBe(
       '{"signedTx":"[redacted]","signer":"0x123"}',
     );
+  });
+
+  test('writes captured logs to a file in debug mode', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'deepx-logger-test-'));
+    process.env.DEEPX_DEBUG_LOG_FILE = join(tempDir, 'debug.log');
+
+    try {
+      setLoggerMode('debug');
+      logNetworkResponse({
+        scope: 'rpc',
+        method: 'POST',
+        url: 'https://example.com/rpc',
+        status: 500,
+        body: '{"signedTx":"0xabc","message":"backend exploded"}',
+      });
+
+      const content = readFileSync(getDebugLogFilePath(), 'utf8').trim();
+      const lines = content.split('\n');
+      expect(lines).toHaveLength(1);
+
+      expect(JSON.parse(lines[0] ?? '')).toMatchObject({
+        level: 'error',
+        scope: 'rpc',
+        message: 'POST https://example.com/rpc -> 500',
+        details: '{"signedTx":"[redacted]","message":"backend exploded"}',
+      });
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test('does not write a file outside debug mode', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'deepx-logger-test-'));
+    process.env.DEEPX_DEBUG_LOG_FILE = join(tempDir, 'debug.log');
+
+    try {
+      setLoggerMode('default');
+      logError('wallet', 'Unlock failed', 'bad passphrase');
+
+      expect(existsSync(getDebugLogFilePath())).toBe(false);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });

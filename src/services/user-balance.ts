@@ -1,11 +1,12 @@
-import { Contract, formatUnits, JsonRpcProvider, toUtf8String } from 'ethers';
+import { Contract, formatUnits, toUtf8String } from 'ethers';
 
 import { getNetworkConfig, type RuntimeNetwork } from '../config/networks';
-import { getMarketPairs } from './market-catalog';
+import { getNetworkMarkets } from './market-catalog';
 import {
   SUBACCOUNT_CONTRACT_ADDRESS,
   type UserStats,
 } from './subaccount-contract';
+import { createRpcProvider } from './transaction-submission';
 import { readWalletRecord } from './wallet-store';
 
 const PERP_CONTRACT_ADDRESS = '0x000000000000000000000000000000000000044E';
@@ -808,7 +809,7 @@ export async function fetchUserBalance(input: {
   contracts: UserBalanceContracts;
 }): Promise<Extract<UserBalanceToolResult, { status: 'success' }>> {
   const balanceTokens = NETWORK_BALANCE_TOKENS[input.network];
-  const perpMarkets = getMarketPairs(getNetworkConfig(input.network))
+  const perpMarkets = (await getNetworkMarkets(getNetworkConfig(input.network)))
     .filter((pair) => pair.kind === 'perp')
     .map((pair) => ({
       marketId: pair.marketId ?? Number(pair.pairId),
@@ -997,7 +998,7 @@ export async function fetchUserBalance(input: {
 function createUserBalanceContracts(
   network: RuntimeNetwork,
 ): UserBalanceContracts {
-  const provider = new JsonRpcProvider(getNetworkConfig(network).rpcUrl);
+  const provider = createRpcProvider(getNetworkConfig(network));
   const subaccountContract = new Contract(
     SUBACCOUNT_CONTRACT_ADDRESS,
     SUBACCOUNT_ABI,

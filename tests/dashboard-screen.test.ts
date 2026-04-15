@@ -4,6 +4,7 @@ import {
   getAssistantMessageSegments,
   getCommandMessageSegments,
   getDashboardLayoutSlots,
+  getInitialOutputView,
   getWelcomeLogoFrames,
   getWorkspaceHeight,
   WELCOME_LOGO_LINES,
@@ -153,18 +154,85 @@ describe('dashboard welcome logo', () => {
     );
   });
 
+  test('starts with an empty workspace in both modes', () => {
+    expect(getInitialOutputView('debug')).toEqual({ kind: 'empty' });
+    expect(getInitialOutputView('default')).toEqual({ kind: 'empty' });
+  });
+
   test('renders the slash-command selector below the input bar', () => {
     expect(
       getDashboardLayoutSlots({
         shellMode: 'chat',
         isCommandPaletteVisible: true,
+        hasPendingTransactionConfirmation: false,
+        hasPendingAgentAction: false,
         outputView: { kind: 'help' },
       }),
     ).toEqual({
       showPairPicker: false,
       showOutputView: true,
       showCommandPaletteBelowInput: true,
+      showTransactionConfirmationBelowInput: false,
+      showAgentActionBelowInput: false,
     });
+  });
+
+  test('renders the transaction confirmation selector below the input bar', () => {
+    expect(
+      getDashboardLayoutSlots({
+        shellMode: 'chat',
+        isCommandPaletteVisible: false,
+        hasPendingTransactionConfirmation: true,
+        hasPendingAgentAction: false,
+        outputView: { kind: 'empty' },
+      }),
+    ).toEqual({
+      showPairPicker: false,
+      showOutputView: false,
+      showCommandPaletteBelowInput: false,
+      showTransactionConfirmationBelowInput: true,
+      showAgentActionBelowInput: false,
+    });
+  });
+
+  test('renders the agent action selector below the input bar', () => {
+    expect(
+      getDashboardLayoutSlots({
+        shellMode: 'chat',
+        isCommandPaletteVisible: false,
+        hasPendingTransactionConfirmation: false,
+        hasPendingAgentAction: true,
+        outputView: { kind: 'empty' },
+      }),
+    ).toEqual({
+      showPairPicker: false,
+      showOutputView: false,
+      showCommandPaletteBelowInput: false,
+      showTransactionConfirmationBelowInput: false,
+      showAgentActionBelowInput: true,
+    });
+  });
+
+  test('hides the transaction selector behind command and pair selectors', () => {
+    expect(
+      getDashboardLayoutSlots({
+        shellMode: 'chat',
+        isCommandPaletteVisible: true,
+        hasPendingTransactionConfirmation: true,
+        hasPendingAgentAction: false,
+        outputView: { kind: 'empty' },
+      }).showTransactionConfirmationBelowInput,
+    ).toBe(false);
+    expect(
+      getDashboardLayoutSlots({
+        shellMode: 'pair-select',
+        pendingCommand: 'candle',
+        isCommandPaletteVisible: false,
+        hasPendingTransactionConfirmation: true,
+        hasPendingAgentAction: false,
+        outputView: { kind: 'empty' },
+      }).showTransactionConfirmationBelowInput,
+    ).toBe(false);
   });
 
   test('shows pair selection below the input bar while keeping the workspace visible', () => {
@@ -173,12 +241,16 @@ describe('dashboard welcome logo', () => {
         shellMode: 'pair-select',
         pendingCommand: 'orderbook',
         isCommandPaletteVisible: true,
+        hasPendingTransactionConfirmation: true,
+        hasPendingAgentAction: true,
         outputView: { kind: 'candle' },
       }),
     ).toEqual({
       showPairPicker: true,
       showOutputView: true,
       showCommandPaletteBelowInput: false,
+      showTransactionConfirmationBelowInput: false,
+      showAgentActionBelowInput: false,
     });
   });
 

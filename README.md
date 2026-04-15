@@ -63,7 +63,7 @@ Direct entrypoint:
 - startup stays simple: parse CLI flags, resolve network, load wallet metadata, offer unlock or import, then enter the shell
 - wallet storage is local and per-network
 - successful unlock keeps the wallet passphrase in process memory for the active session
-- the app opens into a chat-first fullscreen shell with a welcome panel, AI transcript, slash commands, pair picker, bottom input bar, and persistent network line
+- the app opens into a chat-first fullscreen shell with a welcome panel, AI transcript, slash commands, pair picker, confirmation selector, bottom input bar, and persistent network line
 - typing `/` in the input bar opens a live command selector so slash commands can be picked with the keyboard before submission
 - `/candle` and `/orderbook` select a pair first, then render the requested market view in the workspace area
 - sensitive values such as `privateKey`, `passphrase`, and `signedTx` are redacted before entering logs
@@ -83,11 +83,12 @@ Direct entrypoint:
 - the chat panel uses `@google/genai` with `gemini-3-flash-preview`
 - the agent runs in-process and calls built-in DeepX market and order helpers directly
 - the agent can also read the current local wallet balance, collateral, borrow totals, and perp exposure through a read-only balance tool
-- simple trade messages such as `buy 0.001 ETH` or `sell 2 SOL at 150` are parsed locally against the active pair and staged for confirmation
+- the agent can list Subaccount contract subaccounts for the local wallet and prepare new subaccount creation requests through `deepx_create_subaccount`
+- trade prompts such as `buy 0.001 ETH` or `sell 2 SOL at 150` go through the AI agent instead of a local parser shortcut
 - confirmed perp orders can be submitted as live transactions when the wallet is already unlocked for the session
 - the agent tool layer also understands perp position-close and TP/SL update requests
-- AI-driven order cancellation remains blocked until a dedicated confirmation flow exists
-- AI-driven position close and TP/SL updates are exposed to the model but still blocked from live execution in chat
+- AI-driven live-capable tool calls pause for a below-input Confirm/Cancel selector, then resume the agent with the local execution or cancellation result
+- if no wallet passphrase is remembered for the session, confirming an AI action opens a masked passphrase prompt before local execution
 
 ## Shell Keys
 
@@ -95,10 +96,11 @@ Direct entrypoint:
 - type into the bottom input bar for chat or slash commands
 - typing `/` opens the command selector and filters commands as you keep typing
 - `/candle`, `/orderbook`, and `/help` are the supported commands
-- `enter` submits input or confirms the selected pair
+- `enter` submits input, confirms the selected pair, activates the selected confirmation action, or submits a masked passphrase prompt
 - `backspace` edits the input bar
-- `esc` skips wallet boot or exits pair selection back to the input bar
+- `esc` skips wallet boot, cancels a pending confirmation or passphrase prompt, or exits pair selection back to the input bar
 - `up` and `down` move through the pair picker after `/candle` or `/orderbook`
+- `left` and `right` move through the confirmation selector while a staged order or AI action is pending
 - `[` and `]` change chart resolution while candle view is active
 
 ## Quality Checks
