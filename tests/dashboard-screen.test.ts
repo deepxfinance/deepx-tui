@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  getAssistantMessageSegments,
   getCommandMessageSegments,
   getDashboardLayoutSlots,
   getWelcomeLogoFrames,
+  getWorkspaceHeight,
   WELCOME_LOGO_LINES,
 } from '../src/screens/dashboard-screen';
 import { buildHelpLines } from '../src/screens/help-screen';
@@ -59,10 +61,80 @@ describe('dashboard welcome logo', () => {
     ).toEqual(['logo-2-2']);
   });
 
+  test('blinks twice after the final light sweep, then settles lit', () => {
+    const totalDots = WELCOME_LOGO_LINES.reduce(
+      (count, entry) =>
+        count +
+        entry.line.split(' ').filter((character) => character === '●').length,
+      0,
+    );
+    const blinkOffFrame = getWelcomeLogoFrames(totalDots + 1);
+    expect(
+      blinkOffFrame.flatMap((entry) =>
+        entry.segments.filter(
+          (segment) => segment.character === '●' && segment.color === '#34FFAD',
+        ),
+      ),
+    ).toHaveLength(0);
+
+    const settledFrame = getWelcomeLogoFrames(totalDots + 2);
+    expect(
+      settledFrame.flatMap((entry) =>
+        entry.segments.filter(
+          (segment) => segment.character === '●' && segment.color === '#34FFAD',
+        ),
+      ),
+    ).toHaveLength(totalDots);
+
+    const secondBlinkOffFrame = getWelcomeLogoFrames(totalDots + 3);
+    expect(
+      secondBlinkOffFrame.flatMap((entry) =>
+        entry.segments.filter(
+          (segment) => segment.character === '●' && segment.color === '#34FFAD',
+        ),
+      ),
+    ).toHaveLength(0);
+
+    const finalSettledFrame = getWelcomeLogoFrames(totalDots + 4);
+    expect(
+      finalSettledFrame.flatMap((entry) =>
+        entry.segments.filter(
+          (segment) => segment.character === '●' && segment.color === '#34FFAD',
+        ),
+      ),
+    ).toHaveLength(totalDots);
+  });
+
   test('highlights slash-command names inside transcript entries', () => {
     expect(getCommandMessageSegments('/orderbook')).toEqual([
       { text: '/', color: 'gray' },
       { text: 'orderbook', color: '#AAB6FF' },
+    ]);
+  });
+
+  test('highlights submitted order assistant messages for terminal readability', () => {
+    expect(
+      getAssistantMessageSegments(
+        'Order submitted\nSide: BUY\nExplorer: https://explorer-testnet.deepx.fi/tx/0xabc',
+      ),
+    ).toEqual([
+      {
+        key: 'assistant-0-Order submitted',
+        text: 'Order submitted',
+        color: 'green',
+      },
+      { key: 'assistant-1-\n', text: '\n', color: '#7FDBFF' },
+      { key: 'assistant-2-Side:', text: 'Side:', color: '#D7E3F4' },
+      { key: 'assistant-3- ', text: ' ', color: '#7FDBFF' },
+      { key: 'assistant-4-BUY', text: 'BUY', color: '#28DE9C' },
+      { key: 'assistant-5-\n', text: '\n', color: '#7FDBFF' },
+      { key: 'assistant-6-Explorer:', text: 'Explorer:', color: '#D7E3F4' },
+      { key: 'assistant-7- ', text: ' ', color: '#7FDBFF' },
+      {
+        key: 'assistant-8-https://explorer-testnet.deepx.fi/tx/0xabc',
+        text: 'https://explorer-testnet.deepx.fi/tx/0xabc',
+        color: '#AAB6FF',
+      },
     ]);
   });
 
@@ -95,7 +167,7 @@ describe('dashboard welcome logo', () => {
     });
   });
 
-  test('keeps pair selection ahead of the input bar and hides the selector', () => {
+  test('shows pair selection below the input bar while keeping the workspace visible', () => {
     expect(
       getDashboardLayoutSlots({
         shellMode: 'pair-select',
@@ -105,8 +177,14 @@ describe('dashboard welcome logo', () => {
       }),
     ).toEqual({
       showPairPicker: true,
-      showOutputView: false,
+      showOutputView: true,
       showCommandPaletteBelowInput: false,
     });
+  });
+
+  test('scales workspace height with terminal rows', () => {
+    expect(getWorkspaceHeight(undefined)).toBe(22);
+    expect(getWorkspaceHeight(40)).toBe(22);
+    expect(getWorkspaceHeight(56)).toBe(38);
   });
 });

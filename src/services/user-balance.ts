@@ -2,17 +2,218 @@ import { Contract, formatUnits, JsonRpcProvider, toUtf8String } from 'ethers';
 
 import { getNetworkConfig, type RuntimeNetwork } from '../config/networks';
 import { getMarketPairs } from './market-catalog';
+import {
+  SUBACCOUNT_CONTRACT_ADDRESS,
+  type UserStats,
+} from './subaccount-contract';
 import { readWalletRecord } from './wallet-store';
 
 const PERP_CONTRACT_ADDRESS = '0x000000000000000000000000000000000000044E';
 const LENDING_CONTRACT_ADDRESS = '0x0000000000000000000000000000000000000450';
-const SUBACCOUNT_CONTRACT_ADDRESS =
-  '0x0000000000000000000000000000000000000451';
 const LENDING_MARKET_ID = 1;
 const USD_DECIMALS = 6;
 const ASSET_WEIGHT_DECIMALS = 4;
 
-const SUBACCOUNT_ABI = [
+export const SUBACCOUNT_ABI = [
+  {
+    inputs: [
+      {
+        internalType: 'address',
+        name: 'new_account',
+        type: 'address',
+      },
+    ],
+    name: 'createOneClickTradingAccount',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'address',
+        name: 'user',
+        type: 'address',
+      },
+    ],
+    name: 'delegateAccounts',
+    outputs: [
+      {
+        components: [
+          {
+            internalType: 'address',
+            name: 'subaccount',
+            type: 'address',
+          },
+          {
+            internalType: 'bytes',
+            name: 'name',
+            type: 'bytes',
+          },
+        ],
+        internalType: 'struct Subaccount.DelegateInfo[]',
+        name: '',
+        type: 'tuple[]',
+      },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'address',
+        name: 'oct_account',
+        type: 'address',
+      },
+    ],
+    name: 'deleteOneClickTradingAccount',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'address',
+        name: 'subaccount',
+        type: 'address',
+      },
+    ],
+    name: 'deleteSubaccount',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'address',
+        name: 'account',
+        type: 'address',
+      },
+    ],
+    name: 'disableOnClickTradingAccount',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'address',
+        name: 'account',
+        type: 'address',
+      },
+    ],
+    name: 'enableOnClickTradingAccount',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'bytes',
+        name: 'name',
+        type: 'bytes',
+      },
+    ],
+    name: 'initializeSubaccount',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'address',
+        name: 'owner',
+        type: 'address',
+      },
+    ],
+    name: 'oneClickTradingAccountsFor',
+    outputs: [
+      {
+        components: [
+          {
+            internalType: 'address',
+            name: 'account',
+            type: 'address',
+          },
+          {
+            internalType: 'uint8',
+            name: 'mode',
+            type: 'uint8',
+          },
+          {
+            internalType: 'uint32',
+            name: 'create_time',
+            type: 'uint32',
+          },
+        ],
+        internalType: 'struct Subaccount.OneClickTrading[]',
+        name: '',
+        type: 'tuple[]',
+      },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'address',
+        name: 'subaccount',
+        type: 'address',
+      },
+      {
+        internalType: 'bytes',
+        name: 'new_name',
+        type: 'bytes',
+      },
+    ],
+    name: 'renameSubaccount',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'address',
+        name: 'subaccount',
+        type: 'address',
+      },
+      {
+        internalType: 'address',
+        name: 'delegate',
+        type: 'address',
+      },
+    ],
+    name: 'setDelegateAccount',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'address',
+        name: 'subaccount',
+        type: 'address',
+      },
+      {
+        internalType: 'bool',
+        name: 'enable_spot_margin',
+        type: 'bool',
+      },
+    ],
+    name: 'setSpotMargin',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
   {
     inputs: [{ internalType: 'address', name: 'account', type: 'address' }],
     name: 'subaccountInfo',
@@ -50,8 +251,68 @@ const SUBACCOUNT_ABI = [
             name: 'borrow_positions',
             type: 'tuple[]',
           },
+          { internalType: 'uint32', name: 'next_order_id', type: 'uint32' },
+          { internalType: 'uint8', name: 'status', type: 'uint8' },
+          {
+            internalType: 'bool',
+            name: 'is_margin_trading_enabled',
+            type: 'bool',
+          },
         ],
-        internalType: 'struct Subaccount.UserSubaccountInfo',
+        internalType: 'struct Subaccount.User',
+        name: '',
+        type: 'tuple',
+      },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'address',
+        name: 'user',
+        type: 'address',
+      },
+    ],
+    name: 'userStats',
+    outputs: [
+      {
+        components: [
+          {
+            components: [
+              {
+                internalType: 'address',
+                name: 'subaccount',
+                type: 'address',
+              },
+              {
+                internalType: 'bytes',
+                name: 'name',
+                type: 'bytes',
+              },
+            ],
+            internalType: 'struct Subaccount.SimpleSubaccount[]',
+            name: 'subaccounts',
+            type: 'tuple[]',
+          },
+          {
+            internalType: 'uint64',
+            name: 'if_staked_quote_asset_amount',
+            type: 'uint64',
+          },
+          {
+            internalType: 'uint16',
+            name: 'number_of_sub_accounts',
+            type: 'uint16',
+          },
+          {
+            internalType: 'uint16',
+            name: 'number_of_sub_accounts_created',
+            type: 'uint16',
+          },
+        ],
+        internalType: 'struct Subaccount.UserStats',
         name: '',
         type: 'tuple',
       },
@@ -267,14 +528,21 @@ type SpotPosition = {
 };
 
 type BorrowPosition = {
+  lending_market_id?: number;
   asset: string;
   amount: bigint;
   interest: bigint;
 };
 
 type UserSubaccountInfo = {
+  authority?: string;
+  delegate?: string;
+  name?: string;
   spot_positions: SpotPosition[];
   borrow_positions: BorrowPosition[];
+  next_order_id?: number;
+  status?: number;
+  is_margin_trading_enabled?: boolean;
 };
 
 type OraclePrice = {
@@ -300,6 +568,7 @@ type RawPerpPosition = {
 };
 
 type UserBalanceContracts = {
+  userStats(user: string): Promise<UserStats>;
   subaccountInfo(account: string): Promise<UserSubaccountInfo>;
   getOraclePriceAll(): Promise<OraclePrice[]>;
   totalCollateralAndMarginRequiredFor(
@@ -361,6 +630,26 @@ export type UserBalanceToolResult =
       totalMarginRequired: string;
       totalMaintenanceMarginRequired: string;
       assets: UserBalanceAsset[];
+      summary: string;
+    };
+
+export type UserSubaccountsToolResult =
+  | {
+      status: 'unavailable';
+      network: RuntimeNetwork;
+      summary: string;
+    }
+  | {
+      status: 'success';
+      network: RuntimeNetwork;
+      walletAddress: string;
+      subaccounts: {
+        address: string;
+        name: string;
+      }[];
+      numberOfSubaccounts: number;
+      numberOfSubaccountsCreated: number;
+      ifStakedQuoteAssetAmount: string;
       summary: string;
     };
 
@@ -434,13 +723,82 @@ export async function getUserBalanceTool(
   const contracts =
     dependencies.createContracts?.(network) ??
     createUserBalanceContracts(network);
+  const subaccountAddress = await getPrimarySubaccountAddress(
+    walletRecord.address,
+    contracts,
+  );
+
+  if (!subaccountAddress) {
+    return {
+      status: 'unavailable',
+      network,
+      summary: `No subaccount found for ${walletRecord.address} on ${network}. Create or initialize a subaccount first.`,
+    };
+  }
 
   return fetchUserBalance({
     network,
     walletAddress: walletRecord.address,
-    subaccountAddress: walletRecord.address,
+    subaccountAddress,
     contracts,
   });
+}
+
+export async function listUserSubaccountsTool(
+  input: {
+    network?: RuntimeNetwork;
+  } = {},
+  dependencies: UserBalanceDependencies = {},
+): Promise<UserSubaccountsToolResult> {
+  const network = input.network ?? 'deepx_devnet';
+  const loadWalletRecord = dependencies.readWalletRecord ?? readWalletRecord;
+  const walletRecord = await loadWalletRecord(network);
+
+  if (!walletRecord) {
+    return {
+      status: 'unavailable',
+      network,
+      summary: `No local wallet found for ${network}. Import or unlock a wallet first.`,
+    };
+  }
+
+  const contracts =
+    dependencies.createContracts?.(network) ??
+    createUserBalanceContracts(network);
+  const stats = await contracts.userStats(walletRecord.address);
+  const subaccounts = stats.subaccounts.map((subaccount, index) => ({
+    address: subaccount.subaccount,
+    name: formatSubaccountName(subaccount.name, index),
+  }));
+  const numberOfSubaccounts = Number(stats.number_of_sub_accounts);
+  const numberOfSubaccountsCreated = Number(
+    stats.number_of_sub_accounts_created,
+  );
+
+  return {
+    status: 'success',
+    network,
+    walletAddress: walletRecord.address,
+    subaccounts,
+    numberOfSubaccounts,
+    numberOfSubaccountsCreated,
+    ifStakedQuoteAssetAmount: String(stats.if_staked_quote_asset_amount),
+    summary: buildSubaccountsSummary({
+      network,
+      walletAddress: walletRecord.address,
+      subaccounts,
+      numberOfSubaccounts,
+      numberOfSubaccountsCreated,
+    }),
+  };
+}
+
+async function getPrimarySubaccountAddress(
+  walletAddress: string,
+  contracts: UserBalanceContracts,
+) {
+  const stats = await contracts.userStats(walletAddress);
+  return stats.subaccounts[0]?.subaccount;
 }
 
 export async function fetchUserBalance(input: {
@@ -653,6 +1011,9 @@ function createUserBalanceContracts(
   );
 
   return {
+    userStats(user) {
+      return subaccountContract.userStats(user) as Promise<UserStats>;
+    },
     subaccountInfo(account) {
       return subaccountContract.subaccountInfo(
         account,
@@ -690,6 +1051,10 @@ function safeDecodeBytes(value: string) {
   } catch {
     return value;
   }
+}
+
+function formatSubaccountName(value: string, index: number) {
+  return safeDecodeBytes(value) || `Subaccount ${index + 1}`;
 }
 
 function multiplyAmountByPrice(
@@ -778,6 +1143,31 @@ function buildBalanceSummary(input: {
     `unrealized PnL ${formatUsdDisplay(input.totalUnrealizedPnlRaw)}`,
     marginLabel,
   ].join(', ');
+}
+
+function buildSubaccountsSummary(input: {
+  network: RuntimeNetwork;
+  walletAddress: string;
+  subaccounts: { address: string; name: string }[];
+  numberOfSubaccounts: number;
+  numberOfSubaccountsCreated: number;
+}) {
+  if (input.subaccounts.length === 0) {
+    return `No subaccounts found for ${input.walletAddress} on ${input.network}.`;
+  }
+
+  const rows = input.subaccounts
+    .map(
+      (subaccount, index) =>
+        `${index + 1}. ${subaccount.name}: ${subaccount.address}`,
+    )
+    .join('\n');
+
+  return [
+    `Found ${input.numberOfSubaccounts} active subaccount(s) for ${input.walletAddress} on ${input.network}.`,
+    `Total created: ${input.numberOfSubaccountsCreated}.`,
+    rows,
+  ].join('\n');
 }
 
 function marketSymbolFor(marketId: number) {

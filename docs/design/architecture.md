@@ -30,15 +30,17 @@
 
 - the AI chat panel uses an in-process DeepX agent backed by the Google GenAI SDK
 - the agent exposes the existing DeepX order and market helpers as direct function tools instead of routing through MCP
-- the chat tool layer includes a read-only wallet balance helper that fetches local subaccount collateral, borrow totals, and perp exposure over RPC
-- the chat tool layer can submit live perp orders through `deepx_place_order` when the model sets `confirm=true` and a wallet passphrase is available, either explicitly or from the active unlocked session
+- the chat tool layer includes read-only wallet helpers that fetch local subaccount collateral, borrow totals, perp exposure, and the wallet's contract subaccount list over RPC
+- the chat tool layer can submit live perp and spot orders through `deepx_place_order` when the model sets `confirm=true` and a wallet passphrase is available, either explicitly or from the active unlocked session
 - the agent tool registry also exposes dedicated perp position helpers for `deepx_close_position` and `deepx_update_position`
 - AI-driven order cancellation remains blocked until a dedicated confirmation workflow exists
 - AI-driven position close and TP/SL updates remain blocked until a dedicated confirmation workflow exists
 - simple imperative trade messages such as `buy 0.001 ETH` are parsed locally in the dashboard and converted into a staged order flow before confirmation, instead of routing those trivial intents through the LLM
 - live perp `place`, `cancel`, `close`, and TP/SL update flows sign locally, then broadcast the raw transaction directly through the selected network RPC
+- live spot `place` flows use the Subaccount Spot contract order functions, sign locally, then broadcast the raw transaction directly through the selected network RPC
+- live order transaction payloads resolve the wallet's primary Subaccount contract address and pass that subaccount to the trade contract; the local wallet address is only used for signing
 - live execution requires the local encrypted wallet plus an explicit passphrase and confirmation flag at tool-call time
-- spot order execution remains out of scope until token approval and balance flows are ported
+- spot token approval and transfer workflows remain out of scope
 
 ## Observability
 

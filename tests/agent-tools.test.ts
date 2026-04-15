@@ -10,6 +10,7 @@ describe('agent tools', () => {
     expect(DEEPX_AGENT_TOOL_NAMES).toEqual([
       'deepx_list_markets',
       'deepx_get_user_balance',
+      'deepx_list_subaccounts',
       'deepx_place_order',
       'deepx_cancel_order',
       'deepx_list_open_orders',
@@ -38,7 +39,7 @@ describe('agent tools', () => {
         network: 'deepx_testnet',
       },
       {
-        getUserBalance: async ({ network }) => ({
+        getUserBalance: async ({ network } = {}) => ({
           status: 'success',
           network: network ?? 'deepx_devnet',
           walletAddress: '0xabc',
@@ -68,6 +69,48 @@ describe('agent tools', () => {
       network: 'deepx_testnet',
       walletAddress: '0xabc',
       summary: 'stubbed balance',
+    });
+  });
+
+  test('routes subaccount lookups through the user subaccounts tool', async () => {
+    const result = await executeDeepxAgentTool(
+      'deepx_list_subaccounts',
+      {
+        network: 'deepx_testnet',
+      },
+      {
+        listUserSubaccounts: async ({ network } = {}) => ({
+          status: 'success',
+          network: network ?? 'deepx_devnet',
+          walletAddress: '0xabc',
+          subaccounts: [
+            {
+              address: '0xdef',
+              name: 'main',
+            },
+          ],
+          numberOfSubaccounts: 1,
+          numberOfSubaccountsCreated: 1,
+          ifStakedQuoteAssetAmount: '0',
+          summary: 'stubbed subaccounts',
+        }),
+      },
+    );
+
+    expect(result as unknown).toEqual({
+      status: 'success',
+      network: 'deepx_testnet',
+      walletAddress: '0xabc',
+      subaccounts: [
+        {
+          address: '0xdef',
+          name: 'main',
+        },
+      ],
+      numberOfSubaccounts: 1,
+      numberOfSubaccountsCreated: 1,
+      ifStakedQuoteAssetAmount: '0',
+      summary: 'stubbed subaccounts',
     });
   });
 

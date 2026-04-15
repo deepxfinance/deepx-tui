@@ -55,7 +55,7 @@ type TradeItem = {
 
 type UseMarketDataState = {
   pairGroups: Record<PairKind, MarketPair[]>;
-  activePair: MarketPair;
+  currentPair: MarketPair;
   overview: Record<string, OverviewEntry>;
   candles: CandleBar[];
   orderbook: OrderBookState | null;
@@ -85,7 +85,11 @@ export function useMarketData(input: {
     }),
     [allPairs],
   );
-  const activePair = getActivePair(pairGroups, input.pairKind, input.pairIndex);
+  const currentPair = getCurrentPair(
+    pairGroups,
+    input.pairKind,
+    input.pairIndex,
+  );
   const [overview, setOverview] = useState<Record<string, OverviewEntry>>({});
   const [candles, setCandles] = useState<CandleBar[]>([]);
   const [orderbook, setOrderbook] = useState<OrderBookState | null>(null);
@@ -250,7 +254,7 @@ export function useMarketData(input: {
         setCandleError(undefined);
         const nextBars = await fetchCandles({
           network: input.network,
-          pair: activePair,
+          pair: currentPair,
           timeFrame: resolutionToTimeFrame(input.resolution),
           limit: DEFAULT_CANDLE_HISTORY_LIMIT,
         });
@@ -270,7 +274,7 @@ export function useMarketData(input: {
     return () => {
       isCancelled = true;
     };
-  }, [activePair, input.network, input.resolution]);
+  }, [currentPair, input.network, input.resolution]);
 
   useEffect(() => {
     setOrderbook(null);
@@ -303,20 +307,21 @@ export function useMarketData(input: {
       const payload = JSON.stringify({
         action: 'subscribe',
         market: {
-          type: activePair.kind,
-          name: activePair.label,
+          type: currentPair.kind,
+          name: currentPair.label,
         },
         subscriptions: [
           { time_frame: resolutionToTimeFrame(input.resolution) },
           'orderbook',
           'trades',
           'latest_price',
+          'price_change_1h',
           'price_change_24h',
           'volume_stats',
         ],
         options: {
           compress: false,
-          orderbook_depth: 20,
+          orderbook_depth: 40,
           orderbook_price_size: 0.01,
         },
       });
@@ -375,6 +380,41 @@ export function useMarketData(input: {
 
       if (
         result.type === 'data' &&
+        (result.channel === 'latest_price' ||
+          result.channel === 'price_change_1h' ||
+          result.channel === 'price_change_24h' ||
+          result.channel === 'volume_stats')
+      ) {
+        setOverview((current) => {
+          const next = { ...current };
+          const entry = { ...(next[currentPair.label] ?? {}) };
+
+          switch (result.channel) {
+            case 'latest_price':
+              entry.latestPrice = Number(result.data);
+              break;
+            case 'price_change_1h':
+              entry.priceChange1h = Number(result.data);
+              break;
+            case 'price_change_24h':
+              entry.priceChange24h = Number(result.data);
+              break;
+            case 'volume_stats':
+              entry.volume24h = Number(
+                (result.data as { volume_24h?: { totalVolume?: number } })
+                  ?.volume_24h?.totalVolume ?? 0,
+              );
+              break;
+          }
+
+          next[currentPair.label] = entry;
+          return next;
+        });
+        return;
+      }
+
+      if (
+        result.type === 'data' &&
         typeof result.channel === 'string' &&
         result.channel.startsWith('candles')
       ) {
@@ -417,10 +457,10 @@ export function useMarketData(input: {
       clearInterval(heartbeat);
       websocket.close();
     };
-  }, [activePair, input.network.marketWsUrl, input.resolution]);
+  }, [currentPair, input.network.marketWsUrl, input.resolution]);
 
   useEffect(() => {
-    const latestPrice = overview[activePair.label]?.latestPrice;
+    const latestPrice = overview[currentPair.label]?.latestPrice;
     if (!Number.isFinite(latestPrice)) {
       return;
     }
@@ -432,11 +472,11 @@ export function useMarketData(input: {
         input.resolution,
       ),
     );
-  }, [activePair.label, input.resolution, overview]);
+  }, [currentPair.label, input.resolution, overview]);
 
   return {
     pairGroups,
-    activePair,
+    currentPair,
     overview,
     candles,
     orderbook,
@@ -465,7 +505,7 @@ export function isWebSocketPongMessage(input: {
   );
 }
 
-function getActivePair(
+function getCurrentPair(
   pairGroups: Record<PairKind, MarketPair[]>,
   pairKind: PairKind,
   pairIndex: number,

@@ -7,11 +7,11 @@ import {
 } from '../src/services/chat-trade-intent';
 
 describe('chat trade intent', () => {
-  test('parses market buy intents for the active pair', () => {
+  test('parses market buy intents for the current pair', () => {
     expect(
       parseChatTradeIntent({
         message: 'buy 0.001 ETH',
-        activePair: 'ETH-USDC',
+        currentPair: 'ETH-USDC',
       }),
     ).toEqual({
       pair: 'ETH-USDC',
@@ -23,11 +23,11 @@ describe('chat trade intent', () => {
     });
   });
 
-  test('parses limit sell intents for the active pair', () => {
+  test('parses limit sell intents for the current pair', () => {
     expect(
       parseChatTradeIntent({
         message: 'sell 2 SOL at 150',
-        activePair: 'SOL-USDC',
+        currentPair: 'SOL-USDC',
       }),
     ).toEqual({
       pair: 'SOL-USDC',
@@ -39,11 +39,11 @@ describe('chat trade intent', () => {
     });
   });
 
-  test('ignores intents for a different asset than the active pair', () => {
+  test('ignores intents for a different asset than the current pair', () => {
     expect(
       parseChatTradeIntent({
         message: 'buy 1 BTC',
-        activePair: 'ETH-USDC',
+        currentPair: 'ETH-USDC',
       }),
     ).toBeUndefined();
   });

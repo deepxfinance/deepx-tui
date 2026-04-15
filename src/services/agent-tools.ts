@@ -10,11 +10,12 @@ import {
   updatePositionTool,
 } from './order-tools';
 import { listLivePerpPairs } from './perp-trading';
-import { getUserBalanceTool } from './user-balance';
+import { getUserBalanceTool, listUserSubaccountsTool } from './user-balance';
 
 export type DeepxAgentToolName =
   | 'deepx_list_markets'
   | 'deepx_get_user_balance'
+  | 'deepx_list_subaccounts'
   | 'deepx_place_order'
   | 'deepx_cancel_order'
   | 'deepx_list_open_orders'
@@ -57,9 +58,25 @@ export const DEEPX_AGENT_TOOL_DECLARATIONS = [
     },
   },
   {
+    name: 'deepx_list_subaccounts',
+    description:
+      'List all Subaccount contract subaccounts for the locally stored wallet on the requested network.',
+    parametersJsonSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        network: {
+          type: 'string',
+          enum: ['deepx_devnet', 'deepx_testnet'],
+          default: 'deepx_devnet',
+        },
+      },
+    },
+  },
+  {
     name: 'deepx_place_order',
     description:
-      'Place a DeepX order. Perp orders become live when confirm=true and the wallet is already unlocked in this session or a passphrase is provided. Passphrase is optional for an unlocked session wallet. All other markets stay dry-run.',
+      'Place a DeepX order. Perp and spot orders become live when confirm=true and the wallet is already unlocked in this session or a passphrase is provided. Passphrase is optional for an unlocked session wallet.',
     parametersJsonSchema: {
       type: 'object',
       additionalProperties: false,
@@ -75,6 +92,7 @@ export const DEEPX_AGENT_TOOL_DECLARATIONS = [
         type: { type: 'string', enum: ['LIMIT', 'MARKET'] },
         size: { anyOf: [{ type: 'string' }, { type: 'number' }] },
         price: { anyOf: [{ type: 'string' }, { type: 'number' }] },
+        slippage: { anyOf: [{ type: 'string' }, { type: 'number' }] },
         tif: { type: 'string', enum: ['GTC', 'IOC', 'FOK'], default: 'GTC' },
         note: { type: 'string' },
         passphrase: { type: 'string' },
@@ -181,10 +199,13 @@ export async function executeDeepxAgentTool(
   options: {
     allowLiveExecution?: boolean;
     getUserBalance?: typeof getUserBalanceTool;
+    listUserSubaccounts?: typeof listUserSubaccountsTool;
   } = {},
 ) {
   const allowLiveExecution = options.allowLiveExecution ?? false;
   const userBalanceTool = options.getUserBalance ?? getUserBalanceTool;
+  const userSubaccountsTool =
+    options.listUserSubaccounts ?? listUserSubaccountsTool;
 
   switch (name) {
     case 'deepx_list_markets':
@@ -194,6 +215,10 @@ export async function executeDeepxAgentTool(
       };
     case 'deepx_get_user_balance':
       return await userBalanceTool({
+        network: normalizeNetwork(args.network),
+      });
+    case 'deepx_list_subaccounts':
+      return await userSubaccountsTool({
         network: normalizeNetwork(args.network),
       });
     case 'deepx_place_order':
@@ -212,6 +237,7 @@ export async function executeDeepxAgentTool(
         type: String(args.type ?? 'LIMIT') as 'LIMIT' | 'MARKET',
         size: args.size as string | number,
         price: args.price as string | number | undefined,
+        slippage: args.slippage as string | number | undefined,
         tif: args.tif as 'GTC' | 'IOC' | 'FOK' | undefined,
         note: args.note as string | undefined,
         passphrase: allowLiveExecution

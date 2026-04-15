@@ -24,6 +24,9 @@ describe('dashboard chat', () => {
     expect(prompt).toContain('already unlocked');
     expect(prompt).toContain('status=submitted');
     expect(prompt).toContain('Do not ask for the passphrase again');
+    expect(prompt).toContain('always include that transaction explorer link');
+    expect(prompt).toContain('compact terminal-friendly block');
+    expect(prompt).toContain('Use uppercase BUY or SELL exactly');
   });
 
   test('maps chat history into GenAI contents', () => {

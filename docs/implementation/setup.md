@@ -37,7 +37,9 @@ bun test
 - The current agent model target is `gemini-3-flash-preview`
 - DeepX tool calls now stay in-process instead of routing through MCP
 - The in-process tool layer now includes a read-only user balance helper plus dedicated perp position close and TP/SL update helpers in addition to order placement and cancellation
-- AI chat can submit live perp orders through `deepx_place_order` when `confirm=true` and the same active session has already unlocked the wallet, or when a wallet `passphrase` is provided explicitly
+- AI chat can submit live perp and spot orders through `deepx_place_order` when `confirm=true` and the same active session has already unlocked the wallet, or when a wallet `passphrase` is provided explicitly
+- Live perp place, cancel, close, and TP/SL update transactions resolve the wallet's primary Subaccount contract address before populating perp contract calls
+- Live spot place transactions resolve the wallet's primary Subaccount contract address before populating spot contract calls
 - AI chat still blocks live order cancellation
 - AI chat still blocks live position close and TP/SL update actions
 - simple trade commands such as `buy 0.001 ETH` are parsed locally and staged for `confirm`, bypassing the LLM for deterministic order entry
@@ -46,6 +48,6 @@ bun test
 - debug mode captures HTTP market requests, RPC transaction submissions, websocket events, and wallet/chat lifecycle events in the shared logger
 - default mode keeps the shared logger at warn/error level to avoid constant websocket logging overhead
 - sensitive fields such as `signedTx`, `passphrase`, and `privateKey` are redacted before entering the logger
-- `deepx_get_user_balance`, `deepx_place_order`, `deepx_cancel_order`, `deepx_close_position`, and `deepx_update_position` are all available in the in-process tool registry
+- `deepx_get_user_balance`, `deepx_list_subaccounts`, `deepx_place_order`, `deepx_cancel_order`, `deepx_close_position`, and `deepx_update_position` are all available in the in-process tool registry
 - The current build uses a real wallet import flow and a live market dashboard fed by DeepX HTTP and websocket data
 - The repository is intentionally small so feature work can be added incrementally

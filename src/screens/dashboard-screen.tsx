@@ -8,6 +8,7 @@ import { OrderbookPanel } from '../components/orderbook-panel';
 import type { NetworkConfig } from '../config/networks';
 import {
   appendChatMessage,
+  type ChatMessage,
   getChatLoadingSegments,
   getVisibleChatMessages,
 } from '../lib/dashboard-chat';
@@ -67,10 +68,13 @@ const UP_COLOR = '#28DE9C';
 const DOWN_COLOR = '#FF3131';
 const CHAT_USER_COLOR = '#FFD166';
 const CHAT_ASSISTANT_COLOR = '#7FDBFF';
+const CHAT_ASSISTANT_LABEL_COLOR = '#D7E3F4';
+const CHAT_ASSISTANT_LINK_COLOR = '#AAB6FF';
 const WELCOME_LOGO_COLOR = '#34FFAD';
 const WELCOME_LOGO_IDLE_COLOR = '#0F5C41';
 const WELCOME_LOGO_GUIDE_COLOR = '#335C4D';
-const WELCOME_LOGO_ANIMATION_INTERVAL_MS = 45;
+const WELCOME_LOGO_ANIMATION_INTERVAL_MS = 30;
+const WELCOME_LOGO_BLINK_FRAMES = 4;
 const COMMAND_TEXT_COLOR = 'gray';
 const COMMAND_HIGHLIGHT_COLOR = '#AAB6FF';
 export const WELCOME_LOGO_LINES = [
@@ -102,14 +106,18 @@ const WELCOME_LOGO_SEQUENCE = WELCOME_LOGO_LINES.flatMap((entry, rowIndex) =>
 );
 
 const WELCOME_LOGO_DOT_COUNT = WELCOME_LOGO_SEQUENCE.length;
+const WELCOME_LOGO_TOTAL_ANIMATION_FRAMES =
+  WELCOME_LOGO_DOT_COUNT + WELCOME_LOGO_BLINK_FRAMES;
 
 export function getWelcomeLogoFrames(activeDots: number): WelcomeLogoFrame[] {
-  const clampedActiveDots = Math.max(
-    0,
-    Math.min(activeDots, WELCOME_LOGO_DOT_COUNT),
-  );
+  const clampedActiveDots = Math.max(0, activeDots);
+  const blinkPhase = Math.max(0, clampedActiveDots - WELCOME_LOGO_DOT_COUNT);
+  const isBlinkOffPhase = blinkPhase > 0 && blinkPhase % 2 === 1;
+  const displayActiveDots = isBlinkOffPhase
+    ? 0
+    : Math.min(clampedActiveDots, WELCOME_LOGO_DOT_COUNT);
   const activeDotKeys = new Set(
-    WELCOME_LOGO_SEQUENCE.slice(0, clampedActiveDots).map(
+    WELCOME_LOGO_SEQUENCE.slice(0, displayActiveDots).map(
       ({ rowIndex, columnIndex }) => `${rowIndex}-${columnIndex}`,
     ),
   );
@@ -121,18 +129,24 @@ export function getWelcomeLogoFrames(activeDots: number): WelcomeLogoFrame[] {
       .flatMap((character, columnIndex, columns) => {
         const isLargeDot = character === '●';
         const segment: WelcomeLogoSegment = isLargeDot
-          ? activeDotKeys.has(`${rowIndex}-${columnIndex}`)
+          ? isBlinkOffPhase
             ? {
                 key: `${entry.key}-${columnIndex}`,
-                character,
-                color: WELCOME_LOGO_COLOR,
-                bold: true,
+                character: '·',
+                color: WELCOME_LOGO_GUIDE_COLOR,
               }
-            : {
-                key: `${entry.key}-${columnIndex}`,
-                character,
-                color: WELCOME_LOGO_IDLE_COLOR,
-              }
+            : activeDotKeys.has(`${rowIndex}-${columnIndex}`)
+              ? {
+                  key: `${entry.key}-${columnIndex}`,
+                  character,
+                  color: WELCOME_LOGO_COLOR,
+                  bold: true,
+                }
+              : {
+                  key: `${entry.key}-${columnIndex}`,
+                  character,
+                  color: WELCOME_LOGO_IDLE_COLOR,
+                }
           : {
               key: `${entry.key}-${columnIndex}`,
               character,
@@ -161,10 +175,15 @@ export function getDashboardLayoutSlots(
 
   return {
     showPairPicker,
-    showOutputView: !showPairPicker && input.outputView.kind !== 'empty',
+    showOutputView: input.outputView.kind !== 'empty',
     showCommandPaletteBelowInput:
       !showPairPicker && input.isCommandPaletteVisible,
   };
+}
+
+export function getWorkspaceHeight(terminalRows?: number) {
+  const resolvedRows = terminalRows ?? 40;
+  return Math.max(resolvedRows - 18, 22);
 }
 
 export const DashboardScreen: FC<DashboardScreenProps> = ({
@@ -184,7 +203,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     Exclude<ShellCommand, 'help'> | undefined
   >();
   const [outputView, setOutputView] = useState<OutputView>({ kind: 'empty' });
-  const [chatMessages, setChatMessages] = useState(() => []);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => []);
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [chatLoadingFrame, setChatLoadingFrame] = useState(0);
   const [pendingChatTrade, setPendingChatTrade] =
@@ -192,10 +211,11 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
 
   const {
     pairGroups,
-    activePair,
+    currentPair,
     overview,
     candles,
     orderbook,
+    trades,
     isOrderbookConnected,
     candleStreamStatus,
     candleError,
@@ -207,11 +227,11 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     resolution,
   });
 
-  const activeOverview = overview[activePair.label];
+  const currentOverview = overview[currentPair.label];
   const activePrice =
-    activeOverview?.latestPrice ?? Number(orderbook?.latestPrice ?? 0);
+    currentOverview?.latestPrice ?? Number(orderbook?.latestPrice ?? 0);
   const priceLabel =
-    activePrice > 0 ? activePrice.toFixed(activePair.priceDecimal) : '--';
+    activePrice > 0 ? activePrice.toFixed(currentPair.priceDecimal) : '--';
   const resolutionLabel = formatResolution(resolution);
   const visibleChatMessages = useMemo(
     () => getVisibleChatMessages(chatMessages, 8),
@@ -410,7 +430,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
 
       const tradeIntent = parseChatTradeIntent({
         message: content,
-        activePair: activePair.label,
+        currentPair: currentPair.label,
       });
       if (tradeIntent) {
         setPendingChatTrade(tradeIntent);
@@ -431,7 +451,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       const reply = await requestAgentChat({
         messages: nextMessages,
         context: {
-          pairLabel: activePair.label,
+          pairLabel: currentPair.label,
           priceLabel,
           resolutionLabel,
           walletUnlocked,
@@ -487,6 +507,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
   }
 
   const frameWidth = Math.max(process.stdout.columns ?? 120, 100);
+  const workspaceHeight = getWorkspaceHeight(process.stdout.rows);
   const layoutSlots = getDashboardLayoutSlots({
     shellMode,
     pendingCommand,
@@ -523,7 +544,9 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
                   : 'You> '}
               {message.role === 'command'
                 ? renderCommandMessage(message.content)
-                : message.content}
+                : message.role === 'assistant'
+                  ? renderAssistantMessage(message.content)
+                  : message.content}
             </Text>
           ))}
           {isChatLoading ? (
@@ -544,30 +567,26 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
         </TranscriptSection>
       ) : null}
 
-      {layoutSlots.showPairPicker ? (
-        <Section title="Select Pair">
-          <PairPicker
-            command={pendingCommand}
-            items={pairPickerItems}
-            selectedIndex={pairPickerIndex}
-          />
-        </Section>
-      ) : layoutSlots.showOutputView ? (
+      {layoutSlots.showOutputView ? (
         <Box marginBottom={1}>
           {renderOutputView({
             outputView,
-            activePair,
+            currentPair,
             candles,
             candleError,
             candleStreamStatus,
             latestPrice: priceLabel,
+            priceChange1h: currentOverview?.priceChange1h,
+            priceChange24h: currentOverview?.priceChange24h,
+            volume24h: currentOverview?.volume24h,
             orderbook,
+            trades,
             isOrderbookConnected,
             orderbookError,
             resolution,
             resolutionLabel,
             width: frameWidth - 2,
-            height: 22,
+            height: workspaceHeight,
           })}
         </Box>
       ) : null}
@@ -580,6 +599,12 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
             items={commandPaletteItems}
             selectedIndex={commandPaletteIndex}
           />
+        </Section>
+      ) : null}
+
+      {layoutSlots.showPairPicker ? (
+        <Section title="Select Pair">
+          <PairPicker items={pairPickerItems} selectedIndex={pairPickerIndex} />
         </Section>
       ) : null}
 
@@ -612,7 +637,7 @@ const WelcomePanel: FC<WelcomePanelProps> = ({
   useEffect(() => {
     const timer = setInterval(() => {
       setActiveLogoDots((current) => {
-        if (current >= WELCOME_LOGO_DOT_COUNT) {
+        if (current >= WELCOME_LOGO_TOTAL_ANIMATION_FRAMES) {
           clearInterval(timer);
           return current;
         }
@@ -654,8 +679,7 @@ const WelcomePanel: FC<WelcomePanelProps> = ({
           </Text>
           <Text color="gray">Commands: /candle /orderbook /help</Text>
           <Text color="gray">
-            Use Enter to submit. Use Esc to leave pair selection. Use [ and ]
-            while candle view is open.
+            Use Enter to submit. Use Esc to leave pair selection.
           </Text>
         </Box>
       </Box>
@@ -715,15 +739,13 @@ const InputSection: FC<InputSectionProps> = ({ children }) => {
 };
 
 type PairPickerProps = {
-  command: 'candle' | 'orderbook';
   items: Array<{ label: string; description: string }>;
   selectedIndex: number;
 };
 
-const PairPicker: FC<PairPickerProps> = ({ command, items, selectedIndex }) => {
+const PairPicker: FC<PairPickerProps> = ({ items, selectedIndex }) => {
   return (
     <Box flexDirection="column">
-      <Text color="gray">{`Choose a pair for /${command}`}</Text>
       {items.map((item, index) => (
         <Text
           key={`${item.label}-${item.description}`}
@@ -764,15 +786,29 @@ const CommandPalette: FC<CommandPaletteProps> = ({ items, selectedIndex }) => {
 
 function renderOutputView(input: {
   outputView: OutputView;
-  activePair: MarketPair;
+  currentPair: MarketPair;
   candles: Parameters<typeof CandleChart>[0]['candles'];
   candleError?: string;
   candleStreamStatus: Parameters<typeof CandleChart>[0]['streamStatus'];
   latestPrice: string;
+  priceChange1h?: number;
+  priceChange24h?: number;
+  volume24h?: number;
   orderbook: {
     orderSellList?: { price: string; qty: string; value: string }[];
     orderBuyList?: { price: string; qty: string; value: string }[];
   } | null;
+  trades: Array<{
+    price: string | number;
+    qty?: string | number;
+    filledQty?: string | number;
+    amount?: string | number;
+    size?: string | number;
+    filledDirection?: string;
+    isLong?: boolean;
+    createdAt?: string;
+    time?: string | number;
+  }>;
   isOrderbookConnected: boolean;
   orderbookError?: string;
   resolution: string;
@@ -790,8 +826,12 @@ function renderOutputView(input: {
         errorMessage={input.orderbookError}
         isConnected={input.isOrderbookConnected}
         latestPrice={input.latestPrice}
+        priceChange1h={input.priceChange1h}
+        priceChange24h={input.priceChange24h}
+        volume24h={input.volume24h}
         orderbook={input.orderbook}
-        pairLabel={input.activePair.label}
+        pairLabel={input.currentPair.label}
+        trades={input.trades}
       />
     );
   }
@@ -805,7 +845,7 @@ function renderOutputView(input: {
           changeLabel=""
           height={Math.max(input.height - 3, 8)}
           lastPriceLabel={input.latestPrice}
-          pairLabel={input.activePair.label}
+          pairLabel={input.currentPair.label}
           resolution={input.resolution}
           resolutionLabel={input.resolutionLabel}
           streamStatus={input.candleStreamStatus}
@@ -859,4 +899,57 @@ function renderCommandMessage(content: string) {
       {segment.text}
     </Text>
   ));
+}
+
+export function getAssistantMessageSegments(content: string) {
+  const pattern =
+    /(https?:\/\/\S+|BUY|SELL|Order submitted|Status:|Side:|Pair:|Type:|Size:|Price:|Tx Hash:|Explorer:)/g;
+  const parts = content.split(pattern).filter((part) => part.length > 0);
+
+  return parts.map((part, index) => ({
+    key: `assistant-${index}-${part}`,
+    text: part,
+    color: getAssistantMessageColor(part),
+  }));
+}
+
+function renderAssistantMessage(content: string) {
+  return getAssistantMessageSegments(content).map((segment) => (
+    <Text key={segment.key} color={segment.color}>
+      {segment.text}
+    </Text>
+  ));
+}
+
+function getAssistantMessageColor(part: string) {
+  if (part === 'BUY') {
+    return UP_COLOR;
+  }
+
+  if (part === 'SELL') {
+    return DOWN_COLOR;
+  }
+
+  if (part === 'Order submitted') {
+    return 'green';
+  }
+
+  if (
+    part === 'Status:' ||
+    part === 'Side:' ||
+    part === 'Pair:' ||
+    part === 'Type:' ||
+    part === 'Size:' ||
+    part === 'Price:' ||
+    part === 'Tx Hash:' ||
+    part === 'Explorer:'
+  ) {
+    return CHAT_ASSISTANT_LABEL_COLOR;
+  }
+
+  if (part.startsWith('http://') || part.startsWith('https://')) {
+    return CHAT_ASSISTANT_LINK_COLOR;
+  }
+
+  return CHAT_ASSISTANT_COLOR;
 }

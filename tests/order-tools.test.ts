@@ -6,6 +6,7 @@ import {
   buildDryRunPositionUpdate,
   listOpenOrdersDryRun,
   listSupportedMarkets,
+  placeOrderTool,
   resolveLivePassphrase,
 } from '../src/services/order-tools';
 import {
@@ -26,16 +27,16 @@ describe('order tools', () => {
   });
 
   test('builds a dry-run limit order ticket', () => {
-    expect(
-      buildDryRunOrder({
-        pair: 'ETH-USDC',
-        side: 'BUY',
-        type: 'LIMIT',
-        size: '1.25',
-        price: '2500.5',
-        confirm: true,
-      }),
-    ).toMatchObject({
+    const result = buildDryRunOrder({
+      pair: 'ETH-USDC',
+      side: 'BUY',
+      type: 'LIMIT',
+      size: '1.25',
+      price: '2500.5',
+      confirm: true,
+    });
+
+    expect(result).toMatchObject({
       status: 'dry_run',
       network: 'deepx_devnet',
       pair: 'ETH-USDC',
@@ -44,7 +45,19 @@ describe('order tools', () => {
       size: '1.250',
       price: '2500.50',
       notional: '3125.63',
+      explorerUrl: 'http://explorer-devnetx.deepx.fi/tx',
     });
+    expect(result.summary).toBe(
+      'Dry run only\n' +
+        'Side: BUY\n' +
+        'Pair: ETH-USDC\n' +
+        'Type: LIMIT\n' +
+        'Size: 1.250\n' +
+        'Price: 2500.50\n' +
+        'Network: DEVNET\n' +
+        'Explorer:\n' +
+        'http://explorer-devnetx.deepx.fi/tx',
+    );
   });
 
   test('rejects unsupported markets', () => {
@@ -72,6 +85,44 @@ describe('order tools', () => {
     rememberWalletPassphrase('deepx_devnet', 'session-secret');
 
     expect(resolveLivePassphrase('deepx_devnet')).toBe('session-secret');
+  });
+
+  test('keeps unlocked spot orders dry-run until explicitly confirmed', async () => {
+    rememberWalletPassphrase('deepx_devnet', 'session-secret');
+
+    const result = await placeOrderTool({
+      pair: 'ETH/USDC',
+      side: 'BUY',
+      type: 'LIMIT',
+      size: '1',
+      price: '2500',
+    });
+
+    expect(result).toMatchObject({
+      status: 'dry_run',
+      network: 'deepx_devnet',
+      pair: 'ETH/USDC',
+      kind: 'spot',
+    });
+  });
+
+  test('keeps unlocked perp orders dry-run until explicitly confirmed', async () => {
+    rememberWalletPassphrase('deepx_devnet', 'session-secret');
+
+    const result = await placeOrderTool({
+      pair: 'ETH-USDC',
+      side: 'BUY',
+      type: 'LIMIT',
+      size: '1',
+      price: '2500',
+    });
+
+    expect(result).toMatchObject({
+      status: 'dry_run',
+      network: 'deepx_devnet',
+      pair: 'ETH-USDC',
+      kind: 'perp',
+    });
   });
 
   test('builds a dry-run close-position ticket', () => {

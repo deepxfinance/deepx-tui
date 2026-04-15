@@ -254,7 +254,7 @@ describe('agent chat service', () => {
     });
   });
 
-  test('allows AI place-order tool calls to reach live execution guards', async () => {
+  test('returns a dry-run order when AI place-order confirmation is missing', async () => {
     const calls: GenerateContentParameters[] = [];
     const client: GenAiClientLike = {
       models: {
@@ -283,7 +283,7 @@ describe('agent chat service', () => {
           }
 
           return {
-            text: 'Live placement needs confirm=true before submission.',
+            text: 'I prepared a dry-run ticket because confirm=true was missing.',
           };
         },
       },
@@ -302,7 +302,9 @@ describe('agent chat service', () => {
       client,
     });
 
-    expect(result).toBe('Live placement needs confirm=true before submission.');
+    expect(result).toBe(
+      'I prepared a dry-run ticket because confirm=true was missing.',
+    );
     const secondCallContents = calls[1]?.contents as Content[];
     expect(secondCallContents.at(-1)).toEqual({
       role: 'user',
@@ -312,8 +314,33 @@ describe('agent chat service', () => {
             id: 'call-4',
             name: 'deepx_place_order',
             response: {
-              error: {
-                message: 'Live order submission requires confirm=true.',
+              output: {
+                status: 'dry_run',
+                network: 'deepx_devnet',
+                pair: 'ETH-USDC',
+                kind: 'perp',
+                side: 'BUY',
+                type: 'LIMIT',
+                size: '1.000',
+                price: '1000.00',
+                tif: 'GTC',
+                notional: '1000.00',
+                explorerUrl: 'http://explorer-devnetx.deepx.fi/tx',
+                warnings: [
+                  'Confirmation flag was not set. Treat this as a planning ticket only.',
+                  'Dry-run only. No live order was submitted.',
+                  'Wallet signing and exchange submission are not implemented in this repository yet.',
+                ],
+                summary:
+                  'Dry run only\n' +
+                  'Side: BUY\n' +
+                  'Pair: ETH-USDC\n' +
+                  'Type: LIMIT\n' +
+                  'Size: 1.000\n' +
+                  'Price: 1000.00\n' +
+                  'Network: DEVNET\n' +
+                  'Explorer:\n' +
+                  'http://explorer-devnetx.deepx.fi/tx',
               },
             },
           },

@@ -2,6 +2,7 @@ import { Contract, JsonRpcProvider, parseUnits, Wallet } from 'ethers';
 
 import { getNetworkConfig, type RuntimeNetwork } from '../config/networks';
 import { logNetworkRequest, logNetworkResponse } from './logger';
+import { resolvePrimarySubaccountAddress } from './subaccount-contract';
 import { decryptPrivateKey, readWalletRecord } from './wallet-store';
 
 const PERP_CONTRACT_ADDRESS = '0x000000000000000000000000000000000000044E';
@@ -102,6 +103,10 @@ export async function placePerpOrderLive(input: PlacePerpOrderInput): Promise<{
   const privateKey = decryptPrivateKey(walletRecord.crypto, input.passphrase);
   const provider = new JsonRpcProvider(network.rpcUrl);
   const signer = new Wallet(privateKey, provider);
+  const subaccountAddress = await resolvePrimarySubaccountAddress({
+    walletAddress: walletRecord.address,
+    provider,
+  });
   const market = perpMarkets[input.pair];
   const contract = new Contract(PERP_CONTRACT_ADDRESS, PERP_ABI, signer);
 
@@ -122,7 +127,7 @@ export async function placePerpOrderLive(input: PlacePerpOrderInput): Promise<{
   const txRequest = await contract
     .getFunction('placePerpOrder')
     .populateTransaction(
-      walletRecord.address,
+      subaccountAddress,
       market.marketId,
       input.side === 'BUY',
       size,
@@ -154,8 +159,41 @@ export async function placePerpOrderLive(input: PlacePerpOrderInput): Promise<{
     pair: input.pair,
     txHash,
     explorerUrl: `${network.explorerUrl}/tx/${txHash}`,
-    summary: `${network.shortLabel} ${input.side} ${input.size} ${input.pair} ${input.type}`,
+    summary: buildSubmittedOrderSummary({
+      networkLabel: network.shortLabel,
+      pair: input.pair,
+      side: input.side,
+      type: input.type,
+      size: String(input.size),
+      price: input.price == null ? undefined : String(input.price),
+      txHash,
+      explorerUrl: `${network.explorerUrl}/tx/${txHash}`,
+    }),
   };
+}
+
+export function buildSubmittedOrderSummary(input: {
+  networkLabel: string;
+  pair: PerpPair;
+  side: 'BUY' | 'SELL';
+  type: 'LIMIT' | 'MARKET';
+  size: string;
+  price?: string;
+  txHash: string;
+  explorerUrl: string;
+}) {
+  return [
+    'Order submitted',
+    `Side: ${input.side}`,
+    `Pair: ${input.pair}`,
+    `Type: ${input.type}`,
+    `Size: ${input.size}`,
+    ...(input.price ? [`Price: ${input.price}`] : []),
+    `Network: ${input.networkLabel}`,
+    `Tx Hash: ${truncateTxHash(input.txHash)}`,
+    'Explorer:',
+    input.explorerUrl,
+  ].join('\n');
 }
 
 export async function cancelPerpOrderLive(
@@ -182,13 +220,17 @@ export async function cancelPerpOrderLive(
   const privateKey = decryptPrivateKey(walletRecord.crypto, input.passphrase);
   const provider = new JsonRpcProvider(network.rpcUrl);
   const signer = new Wallet(privateKey, provider);
+  const subaccountAddress = await resolvePrimarySubaccountAddress({
+    walletAddress: walletRecord.address,
+    provider,
+  });
   const market = perpMarkets[input.pair];
   const contract = new Contract(PERP_CONTRACT_ADDRESS, PERP_ABI, signer);
   const nonce = await signer.getNonce('pending');
 
   const txRequest = await contract
     .getFunction('cancelOrder')
-    .populateTransaction(walletRecord.address, market.marketId, input.orderId);
+    .populateTransaction(subaccountAddress, market.marketId, input.orderId);
 
   const signedTx = await signer.signTransaction({
     ...txRequest,
@@ -237,6 +279,10 @@ export async function closePerpPositionLive(
   const privateKey = decryptPrivateKey(walletRecord.crypto, input.passphrase);
   const provider = new JsonRpcProvider(network.rpcUrl);
   const signer = new Wallet(privateKey, provider);
+  const subaccountAddress = await resolvePrimarySubaccountAddress({
+    walletAddress: walletRecord.address,
+    provider,
+  });
   const market = perpMarkets[input.pair];
   const contract = new Contract(PERP_CONTRACT_ADDRESS, PERP_ABI, signer);
   const nonce = await signer.getNonce('pending');
@@ -244,7 +290,7 @@ export async function closePerpPositionLive(
   const txRequest = await contract
     .getFunction('closePosition')
     .populateTransaction(
-      walletRecord.address,
+      subaccountAddress,
       market.marketId,
       parsePositiveDecimal(input.price, market.priceDecimals, 'price'),
       normalizeSlippage(input.slippage),
@@ -297,6 +343,10 @@ export async function updatePerpPositionLive(
   const privateKey = decryptPrivateKey(walletRecord.crypto, input.passphrase);
   const provider = new JsonRpcProvider(network.rpcUrl);
   const signer = new Wallet(privateKey, provider);
+  const subaccountAddress = await resolvePrimarySubaccountAddress({
+    walletAddress: walletRecord.address,
+    provider,
+  });
   const market = perpMarkets[input.pair];
   const contract = new Contract(PERP_CONTRACT_ADDRESS, PERP_ABI, signer);
   const nonce = await signer.getNonce('pending');
@@ -304,7 +354,7 @@ export async function updatePerpPositionLive(
   const txRequest = await contract
     .getFunction('setProfitAndLossPoint')
     .populateTransaction(
-      walletRecord.address,
+      subaccountAddress,
       market.marketId,
       parseNonNegativeDecimal(
         input.takeProfit,
@@ -455,4 +505,12 @@ export function formatRpcFailureMessage(error: unknown) {
   }
 
   return 'RPC transaction submission failed.';
+}
+
+function truncateTxHash(txHash: string) {
+  if (txHash.length <= 13) {
+    return txHash;
+  }
+
+  return `${txHash.slice(0, 8)}...${txHash.slice(-4)}`;
 }

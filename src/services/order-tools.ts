@@ -7,6 +7,7 @@ import {
   placePerpOrderLive,
   updatePerpPositionLive,
 } from './perp-trading';
+import { listLiveSpotPairs, placeSpotOrderLive } from './spot-trading';
 import { getRememberedWalletPassphrase } from './wallet-session';
 
 export type OrderSide = 'BUY' | 'SELL';
@@ -20,6 +21,7 @@ export type PlaceOrderInput = {
   size: string | number;
   price?: string | number;
   tif?: 'GTC' | 'IOC' | 'FOK';
+  slippage?: string | number;
   note?: string;
   confirm?: boolean;
 };
@@ -35,6 +37,7 @@ export type OrderToolResult = {
   price?: string;
   tif: 'GTC' | 'IOC' | 'FOK';
   notional?: string;
+  explorerUrl: string;
   warnings: string[];
   summary: string;
 };
@@ -57,9 +60,10 @@ export async function placeOrderTool(
 ) {
   const network = input.network ?? 'deepx_devnet';
   const livePair = asLivePerpPair(input.pair);
+  const liveSpotPair = asLiveSpotPair(input.pair);
   const passphrase = resolveLivePassphrase(network, input.passphrase);
 
-  if (livePair && passphrase) {
+  if (livePair && input.confirm === true && passphrase) {
     return placePerpOrderLive({
       network,
       pair: livePair,
@@ -67,6 +71,20 @@ export async function placeOrderTool(
       type: input.type,
       size: input.size,
       price: input.price,
+      passphrase,
+      confirm: input.confirm ?? false,
+    });
+  }
+
+  if (liveSpotPair && input.confirm === true && passphrase) {
+    return placeSpotOrderLive({
+      network,
+      pair: liveSpotPair,
+      side: input.side,
+      type: input.type,
+      size: input.size,
+      price: input.price,
+      slippage: input.slippage,
       passphrase,
       confirm: input.confirm ?? false,
     });
@@ -185,6 +203,7 @@ export function listSupportedMarkets(network: RuntimeNetwork) {
 
 export function buildDryRunOrder(input: PlaceOrderInput): OrderToolResult {
   const network = input.network ?? 'deepx_devnet';
+  const networkConfig = getNetworkConfig(network);
   const pair = findPair(network, input.pair);
   const side = normalizeSide(input.side);
   const type = normalizeType(input.type);
@@ -216,15 +235,18 @@ export function buildDryRunOrder(input: PlaceOrderInput): OrderToolResult {
     price,
     tif,
     notional: price ? formatNotional(price, size) : undefined,
+    explorerUrl: `${networkConfig.explorerUrl}/tx`,
     warnings,
     summary: buildOrderSummary({
-      network,
+      statusLabel: 'Dry run only',
+      networkLabel: networkConfig.shortLabel,
       pair: pair.label,
       side,
       type,
       size,
       price,
-      tif,
+      txHash: undefined,
+      explorerUrl: `${networkConfig.explorerUrl}/tx`,
     }),
   };
 }
@@ -340,6 +362,10 @@ function asLivePerpPair(pair: string) {
   return listLivePerpPairs().find((item) => item === pair);
 }
 
+function asLiveSpotPair(pair: string) {
+  return listLiveSpotPairs().find((item) => item === pair);
+}
+
 function findPair(network: RuntimeNetwork, requestedPair: string) {
   const normalized = requestedPair.trim().toUpperCase();
   const pair = getMarketPairs(getNetworkConfig(network)).find(
@@ -421,14 +447,34 @@ function formatNotional(price: string, size: string): string {
 }
 
 function buildOrderSummary(input: {
-  network: RuntimeNetwork;
+  statusLabel: string;
+  networkLabel: string;
   pair: string;
   side: OrderSide;
   type: OrderType;
   size: string;
   price?: string;
-  tif: 'GTC' | 'IOC' | 'FOK';
+  txHash?: string;
+  explorerUrl: string;
 }) {
-  const priceSuffix = input.price ? ` @ ${input.price}` : '';
-  return `${input.network} ${input.side} ${input.size} ${input.pair} ${input.type}${priceSuffix} ${input.tif}`;
+  return [
+    input.statusLabel,
+    `Side: ${input.side}`,
+    `Pair: ${input.pair}`,
+    `Type: ${input.type}`,
+    `Size: ${input.size}`,
+    ...(input.price ? [`Price: ${input.price}`] : []),
+    `Network: ${input.networkLabel}`,
+    ...(input.txHash ? [`Tx Hash: ${truncateTxHash(input.txHash)}`] : []),
+    'Explorer:',
+    input.explorerUrl,
+  ].join('\n');
+}
+
+function truncateTxHash(txHash: string) {
+  if (txHash.length <= 13) {
+    return txHash;
+  }
+
+  return `${txHash.slice(0, 8)}...${txHash.slice(-4)}`;
 }

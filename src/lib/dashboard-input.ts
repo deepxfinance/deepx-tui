@@ -125,6 +125,16 @@ export function formatNetworkLine(input: {
   return `Network: ${input.networkLabel}  |  ${modeLabel}  |  ${walletLabel}`;
 }
 
+export function formatDebugFilterLine(
+  filterQuery: string,
+  focusMode: 'debug' | 'chat',
+) {
+  const focusLabel =
+    focusMode === 'debug' ? 'debug filter active' : 'chat input active';
+  const queryLabel = filterQuery.trim() ? filterQuery : 'all logs';
+  return `Filter: ${queryLabel}  |  ${focusLabel}`;
+}
+
 export function moveSelectionIndex(
   currentIndex: number,
   itemCount: number,
