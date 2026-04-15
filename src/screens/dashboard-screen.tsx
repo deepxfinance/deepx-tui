@@ -50,11 +50,27 @@ type OutputView =
   | { kind: 'candle' }
   | { kind: 'orderbook' };
 
+type DashboardLayoutSlotsInput = {
+  shellMode: ShellMode;
+  pendingCommand?: Exclude<ShellCommand, 'help'>;
+  isCommandPaletteVisible: boolean;
+  outputView: OutputView;
+};
+
+type DashboardLayoutSlots = {
+  showPairPicker: boolean;
+  showOutputView: boolean;
+  showCommandPaletteBelowInput: boolean;
+};
+
 const UP_COLOR = '#28DE9C';
 const DOWN_COLOR = '#FF3131';
 const CHAT_USER_COLOR = '#FFD166';
 const CHAT_ASSISTANT_COLOR = '#7FDBFF';
 const WELCOME_LOGO_COLOR = '#34FFAD';
+const WELCOME_LOGO_IDLE_COLOR = '#0F5C41';
+const WELCOME_LOGO_GUIDE_COLOR = '#335C4D';
+const WELCOME_LOGO_ANIMATION_INTERVAL_MS = 45;
 const COMMAND_TEXT_COLOR = 'gray';
 const COMMAND_HIGHLIGHT_COLOR = '#AAB6FF';
 export const WELCOME_LOGO_LINES = [
@@ -64,6 +80,92 @@ export const WELCOME_LOGO_LINES = [
   { key: 'logo-4', line: '· · ● ● ● ● ● · · ● ● ● ● ● · ·' },
   { key: 'logo-5', line: '● ● ● ● ● ● · · · · ● ● ● ● ● ●' },
 ] as const;
+
+type WelcomeLogoSegment = {
+  key: string;
+  character: string;
+  color: string;
+  bold?: boolean;
+};
+
+type WelcomeLogoFrame = {
+  key: string;
+  segments: WelcomeLogoSegment[];
+};
+
+const WELCOME_LOGO_SEQUENCE = WELCOME_LOGO_LINES.flatMap((entry, rowIndex) =>
+  entry.line
+    .split(' ')
+    .flatMap((character, columnIndex) =>
+      character === '●' ? [{ rowIndex, columnIndex }] : [],
+    ),
+);
+
+const WELCOME_LOGO_DOT_COUNT = WELCOME_LOGO_SEQUENCE.length;
+
+export function getWelcomeLogoFrames(activeDots: number): WelcomeLogoFrame[] {
+  const clampedActiveDots = Math.max(
+    0,
+    Math.min(activeDots, WELCOME_LOGO_DOT_COUNT),
+  );
+  const activeDotKeys = new Set(
+    WELCOME_LOGO_SEQUENCE.slice(0, clampedActiveDots).map(
+      ({ rowIndex, columnIndex }) => `${rowIndex}-${columnIndex}`,
+    ),
+  );
+
+  return WELCOME_LOGO_LINES.map((entry, rowIndex) => ({
+    key: entry.key,
+    segments: entry.line
+      .split(' ')
+      .flatMap((character, columnIndex, columns) => {
+        const isLargeDot = character === '●';
+        const segment: WelcomeLogoSegment = isLargeDot
+          ? activeDotKeys.has(`${rowIndex}-${columnIndex}`)
+            ? {
+                key: `${entry.key}-${columnIndex}`,
+                character,
+                color: WELCOME_LOGO_COLOR,
+                bold: true,
+              }
+            : {
+                key: `${entry.key}-${columnIndex}`,
+                character,
+                color: WELCOME_LOGO_IDLE_COLOR,
+              }
+          : {
+              key: `${entry.key}-${columnIndex}`,
+              character,
+              color: WELCOME_LOGO_GUIDE_COLOR,
+            };
+
+        return columnIndex < columns.length - 1
+          ? [
+              segment,
+              {
+                key: `${entry.key}-${columnIndex}-space`,
+                character: ' ',
+                color: segment.color,
+              },
+            ]
+          : [segment];
+      }),
+  }));
+}
+
+export function getDashboardLayoutSlots(
+  input: DashboardLayoutSlotsInput,
+): DashboardLayoutSlots {
+  const showPairPicker =
+    input.shellMode === 'pair-select' && Boolean(input.pendingCommand);
+
+  return {
+    showPairPicker,
+    showOutputView: !showPairPicker && input.outputView.kind !== 'empty',
+    showCommandPaletteBelowInput:
+      !showPairPicker && input.isCommandPaletteVisible,
+  };
+}
 
 export const DashboardScreen: FC<DashboardScreenProps> = ({
   mode,
@@ -385,6 +487,12 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
   }
 
   const frameWidth = Math.max(process.stdout.columns ?? 120, 100);
+  const layoutSlots = getDashboardLayoutSlots({
+    shellMode,
+    pendingCommand,
+    isCommandPaletteVisible,
+    outputView,
+  });
 
   return (
     <Box flexDirection="column" width={frameWidth} paddingX={1}>
@@ -436,7 +544,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
         </TranscriptSection>
       ) : null}
 
-      {shellMode === 'pair-select' && pendingCommand ? (
+      {layoutSlots.showPairPicker ? (
         <Section title="Select Pair">
           <PairPicker
             command={pendingCommand}
@@ -444,14 +552,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
             selectedIndex={pairPickerIndex}
           />
         </Section>
-      ) : isCommandPaletteVisible ? (
-        <Section title="Commands">
-          <CommandPalette
-            items={commandPaletteItems}
-            selectedIndex={commandPaletteIndex}
-          />
-        </Section>
-      ) : outputView.kind !== 'empty' ? (
+      ) : layoutSlots.showOutputView ? (
         <Box marginBottom={1}>
           {renderOutputView({
             outputView,
@@ -472,6 +573,16 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       ) : null}
 
       <InputSection>{formatShellComposerLine(inputValue, true)}</InputSection>
+
+      {layoutSlots.showCommandPaletteBelowInput ? (
+        <Section title="Commands">
+          <CommandPalette
+            items={commandPaletteItems}
+            selectedIndex={commandPaletteIndex}
+          />
+        </Section>
+      ) : null}
+
       <Text color="gray">
         {formatNetworkLine({
           networkLabel: network.label,
@@ -496,13 +607,38 @@ const WelcomePanel: FC<WelcomePanelProps> = ({
   walletAddress,
   walletUnlocked,
 }) => {
+  const [activeLogoDots, setActiveLogoDots] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setActiveLogoDots((current) => {
+        if (current >= WELCOME_LOGO_DOT_COUNT) {
+          clearInterval(timer);
+          return current;
+        }
+
+        return current + 1;
+      });
+    }, WELCOME_LOGO_ANIMATION_INTERVAL_MS);
+
+    return () => clearInterval(timer);
+  }, []);
+
   return (
     <Section title={`DeepX Terminal ${mode}`}>
       <Box>
         <Box flexDirection="column" marginRight={2}>
-          {WELCOME_LOGO_LINES.map((entry) => (
-            <Text key={entry.key} color={WELCOME_LOGO_COLOR}>
-              {entry.line}
+          {getWelcomeLogoFrames(activeLogoDots).map((entry) => (
+            <Text key={entry.key}>
+              {entry.segments.map((segment) => (
+                <Text
+                  key={segment.key}
+                  color={segment.color}
+                  bold={segment.bold}
+                >
+                  {segment.character}
+                </Text>
+              ))}
             </Text>
           ))}
         </Box>

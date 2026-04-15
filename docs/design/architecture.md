@@ -30,6 +30,7 @@
 
 - the AI chat panel uses an in-process DeepX agent backed by the Google GenAI SDK
 - the agent exposes the existing DeepX order and market helpers as direct function tools instead of routing through MCP
+- the chat tool layer includes a read-only wallet balance helper that fetches local subaccount collateral, borrow totals, and perp exposure over RPC
 - the chat tool layer can submit live perp orders through `deepx_place_order` when the model sets `confirm=true` and a wallet passphrase is available, either explicitly or from the active unlocked session
 - the agent tool registry also exposes dedicated perp position helpers for `deepx_close_position` and `deepx_update_position`
 - AI-driven order cancellation remains blocked until a dedicated confirmation workflow exists

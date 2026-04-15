@@ -10,9 +10,11 @@ import {
   updatePositionTool,
 } from './order-tools';
 import { listLivePerpPairs } from './perp-trading';
+import { getUserBalanceTool } from './user-balance';
 
 export type DeepxAgentToolName =
   | 'deepx_list_markets'
+  | 'deepx_get_user_balance'
   | 'deepx_place_order'
   | 'deepx_cancel_order'
   | 'deepx_list_open_orders'
@@ -26,6 +28,22 @@ export const DEEPX_AGENT_TOOL_DECLARATIONS = [
     name: 'deepx_list_markets',
     description:
       'List supported DeepX markets and precision metadata for the requested network.',
+    parametersJsonSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        network: {
+          type: 'string',
+          enum: ['deepx_devnet', 'deepx_testnet'],
+          default: 'deepx_devnet',
+        },
+      },
+    },
+  },
+  {
+    name: 'deepx_get_user_balance',
+    description:
+      'Return wallet balance, collateral, borrow totals, and perp exposure for the locally stored wallet on the requested network.',
     parametersJsonSchema: {
       type: 'object',
       additionalProperties: false,
@@ -162,9 +180,11 @@ export async function executeDeepxAgentTool(
   args: ToolArguments,
   options: {
     allowLiveExecution?: boolean;
+    getUserBalance?: typeof getUserBalanceTool;
   } = {},
 ) {
   const allowLiveExecution = options.allowLiveExecution ?? false;
+  const userBalanceTool = options.getUserBalance ?? getUserBalanceTool;
 
   switch (name) {
     case 'deepx_list_markets':
@@ -172,6 +192,10 @@ export async function executeDeepxAgentTool(
         network: normalizeNetwork(args.network),
         markets: listSupportedMarkets(normalizeNetwork(args.network)),
       };
+    case 'deepx_get_user_balance':
+      return await userBalanceTool({
+        network: normalizeNetwork(args.network),
+      });
     case 'deepx_place_order':
       if (!allowLiveExecution && hasLiveExecutionRequest(args)) {
         return buildLiveExecutionBlockedResult({

@@ -9,6 +9,7 @@ describe('agent tools', () => {
   test('exposes current supported tool names', () => {
     expect(DEEPX_AGENT_TOOL_NAMES).toEqual([
       'deepx_list_markets',
+      'deepx_get_user_balance',
       'deepx_place_order',
       'deepx_cancel_order',
       'deepx_list_open_orders',
@@ -27,6 +28,46 @@ describe('agent tools', () => {
       orders: [],
       summary:
         'Open orders are unavailable in dry-run mode because live account queries are not implemented yet.',
+    });
+  });
+
+  test('routes balance lookups through the user balance tool', async () => {
+    const result = await executeDeepxAgentTool(
+      'deepx_get_user_balance',
+      {
+        network: 'deepx_testnet',
+      },
+      {
+        getUserBalance: async ({ network }) => ({
+          status: 'success',
+          network: network ?? 'deepx_devnet',
+          walletAddress: '0xabc',
+          subaccountAddress: '0xabc',
+          netValue: '10.0',
+          netValueDisplay: '$10.00',
+          totalValue: '12.0',
+          totalValueDisplay: '$12.00',
+          totalDeposits: '15.0',
+          totalDepositsDisplay: '$15.00',
+          totalBorrowed: '3.0',
+          totalBorrowedDisplay: '$3.00',
+          totalUnrealizedPnl: '0.0',
+          totalUnrealizedPnlDisplay: '$0.00',
+          marginRatio: '-1',
+          totalCollateral: '15.0',
+          totalMarginRequired: '5.0',
+          totalMaintenanceMarginRequired: '0.0',
+          assets: [],
+          summary: 'stubbed balance',
+        }),
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: 'success',
+      network: 'deepx_testnet',
+      walletAddress: '0xabc',
+      summary: 'stubbed balance',
     });
   });
 

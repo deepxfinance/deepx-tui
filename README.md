@@ -82,6 +82,7 @@ Direct entrypoint:
 
 - the chat panel uses `@google/genai` with `gemini-3-flash-preview`
 - the agent runs in-process and calls built-in DeepX market and order helpers directly
+- the agent can also read the current local wallet balance, collateral, borrow totals, and perp exposure through a read-only balance tool
 - simple trade messages such as `buy 0.001 ETH` or `sell 2 SOL at 150` are parsed locally against the active pair and staged for confirmation
 - confirmed perp orders can be submitted as live transactions when the wallet is already unlocked for the session
 - the agent tool layer also understands perp position-close and TP/SL update requests

@@ -1,0 +1,792 @@
+import { Contract, formatUnits, JsonRpcProvider, toUtf8String } from 'ethers';
+
+import { getNetworkConfig, type RuntimeNetwork } from '../config/networks';
+import { getMarketPairs } from './market-catalog';
+import { readWalletRecord } from './wallet-store';
+
+const PERP_CONTRACT_ADDRESS = '0x000000000000000000000000000000000000044E';
+const LENDING_CONTRACT_ADDRESS = '0x0000000000000000000000000000000000000450';
+const SUBACCOUNT_CONTRACT_ADDRESS =
+  '0x0000000000000000000000000000000000000451';
+const LENDING_MARKET_ID = 1;
+const USD_DECIMALS = 6;
+const ASSET_WEIGHT_DECIMALS = 4;
+
+const SUBACCOUNT_ABI = [
+  {
+    inputs: [{ internalType: 'address', name: 'account', type: 'address' }],
+    name: 'subaccountInfo',
+    outputs: [
+      {
+        components: [
+          { internalType: 'address', name: 'authority', type: 'address' },
+          { internalType: 'address', name: 'delegate', type: 'address' },
+          { internalType: 'bytes', name: 'name', type: 'bytes' },
+          {
+            components: [
+              { internalType: 'bytes', name: 'symbol', type: 'bytes' },
+              {
+                internalType: 'uint128',
+                name: 'token_amount',
+                type: 'uint128',
+              },
+            ],
+            internalType: 'struct Subaccount.SpotPosition[]',
+            name: 'spot_positions',
+            type: 'tuple[]',
+          },
+          {
+            components: [
+              {
+                internalType: 'uint8',
+                name: 'lending_market_id',
+                type: 'uint8',
+              },
+              { internalType: 'bytes', name: 'asset', type: 'bytes' },
+              { internalType: 'uint128', name: 'amount', type: 'uint128' },
+              { internalType: 'uint128', name: 'interest', type: 'uint128' },
+            ],
+            internalType: 'struct Subaccount.BorrowPosition[]',
+            name: 'borrow_positions',
+            type: 'tuple[]',
+          },
+        ],
+        internalType: 'struct Subaccount.UserSubaccountInfo',
+        name: '',
+        type: 'tuple',
+      },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
+
+const PERP_ABI = [
+  {
+    inputs: [],
+    name: 'getOraclePriceAll',
+    outputs: [
+      {
+        components: [
+          { internalType: 'bytes', name: 'symbol', type: 'bytes' },
+          { internalType: 'uint128', name: 'price', type: 'uint128' },
+        ],
+        internalType: 'struct Perp.OraclePrice[]',
+        name: '',
+        type: 'tuple[]',
+      },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { internalType: 'address', name: 'user', type: 'address' },
+      {
+        internalType: 'uint8',
+        name: 'weight_direction',
+        type: 'uint8',
+      },
+    ],
+    name: 'totalCollateralAndMarginRequiredFor',
+    outputs: [
+      {
+        components: [
+          { internalType: 'uint128', name: 'collateral', type: 'uint128' },
+          {
+            internalType: 'uint128',
+            name: 'margin_required',
+            type: 'uint128',
+          },
+        ],
+        internalType: 'struct Perp.TotalCollateralAndMargin',
+        name: '',
+        type: 'tuple',
+      },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { internalType: 'address', name: 'user', type: 'address' },
+      {
+        internalType: 'uint16[]',
+        name: 'market_id',
+        type: 'uint16[]',
+      },
+    ],
+    name: 'userPerpPositions',
+    outputs: [
+      {
+        components: [
+          { internalType: 'uint16', name: 'market_id', type: 'uint16' },
+          { internalType: 'bool', name: 'is_long', type: 'bool' },
+          {
+            internalType: 'uint128',
+            name: 'base_asset_amount',
+            type: 'uint128',
+          },
+          { internalType: 'uint128', name: 'entry_price', type: 'uint128' },
+          { internalType: 'uint8', name: 'leverage', type: 'uint8' },
+          {
+            internalType: 'int128',
+            name: 'last_funding_rate',
+            type: 'int128',
+          },
+          { internalType: 'uint64', name: 'version', type: 'uint64' },
+          {
+            internalType: 'int128',
+            name: 'realized_pnl',
+            type: 'int128',
+          },
+          {
+            internalType: 'int128',
+            name: 'funding_payment',
+            type: 'int128',
+          },
+          { internalType: 'address', name: 'owner', type: 'address' },
+          { internalType: 'uint128', name: 'take_profit', type: 'uint128' },
+          { internalType: 'uint128', name: 'stop_loss', type: 'uint128' },
+          {
+            internalType: 'uint128',
+            name: 'liquidate_price',
+            type: 'uint128',
+          },
+        ],
+        internalType: 'struct Perp.PerpPosition[]',
+        name: '',
+        type: 'tuple[]',
+      },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
+
+const LENDING_ABI = [
+  {
+    inputs: [
+      {
+        internalType: 'uint8',
+        name: 'lending_market',
+        type: 'uint8',
+      },
+    ],
+    name: 'assetPools',
+    outputs: [
+      {
+        components: [
+          { internalType: 'uint8', name: 'market_id', type: 'uint8' },
+          { internalType: 'bytes', name: 'asset', type: 'bytes' },
+          { internalType: 'uint32', name: 'decimal', type: 'uint32' },
+          {
+            internalType: 'uint128',
+            name: 'total_deposits',
+            type: 'uint128',
+          },
+          {
+            internalType: 'uint128',
+            name: 'total_borrows',
+            type: 'uint128',
+          },
+          {
+            internalType: 'uint128',
+            name: 'cumulative_deposit_interest',
+            type: 'uint128',
+          },
+          {
+            internalType: 'uint128',
+            name: 'cumulative_borrow_interest',
+            type: 'uint128',
+          },
+          {
+            internalType: 'uint64',
+            name: 'last_updated_slot',
+            type: 'uint64',
+          },
+          {
+            internalType: 'uint128',
+            name: 'reserve_factor',
+            type: 'uint128',
+          },
+          {
+            internalType: 'uint128',
+            name: 'custom_liquidation_bonus',
+            type: 'uint128',
+          },
+          {
+            internalType: 'uint128',
+            name: 'initial_asset_weight',
+            type: 'uint128',
+          },
+          {
+            internalType: 'uint128',
+            name: 'maintenance_asset_weight',
+            type: 'uint128',
+          },
+          {
+            internalType: 'uint128',
+            name: 'initial_borrow_weight',
+            type: 'uint128',
+          },
+          {
+            internalType: 'uint128',
+            name: 'maintenance_borrow_weight',
+            type: 'uint128',
+          },
+          { internalType: 'uint128', name: 'apr_borrow', type: 'uint128' },
+          { internalType: 'uint128', name: 'apr_lend', type: 'uint128' },
+          {
+            internalType: 'uint128',
+            name: 'protocol_reserve',
+            type: 'uint128',
+          },
+        ],
+        internalType: 'struct Lending.AssetPoolState[]',
+        name: '',
+        type: 'tuple[]',
+      },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
+
+type BalanceToken = {
+  name: string;
+  symbol: string;
+  address: string;
+  decimals: number;
+  marketId: number;
+};
+
+type SpotPosition = {
+  symbol: string;
+  token_amount: bigint;
+};
+
+type BorrowPosition = {
+  asset: string;
+  amount: bigint;
+  interest: bigint;
+};
+
+type UserSubaccountInfo = {
+  spot_positions: SpotPosition[];
+  borrow_positions: BorrowPosition[];
+};
+
+type OraclePrice = {
+  symbol: string;
+  price: bigint;
+};
+
+type AssetPoolState = {
+  market_id: number;
+  initial_asset_weight: bigint;
+};
+
+type TotalCollateralAndMargin = {
+  collateral: bigint;
+  margin_required: bigint;
+};
+
+type RawPerpPosition = {
+  market_id: number;
+  is_long: boolean;
+  base_asset_amount: bigint;
+  entry_price: bigint;
+};
+
+type UserBalanceContracts = {
+  subaccountInfo(account: string): Promise<UserSubaccountInfo>;
+  getOraclePriceAll(): Promise<OraclePrice[]>;
+  totalCollateralAndMarginRequiredFor(
+    account: string,
+    weightDirection: number,
+  ): Promise<TotalCollateralAndMargin>;
+  userPerpPositions(
+    account: string,
+    marketIds: number[],
+  ): Promise<RawPerpPosition[]>;
+  assetPools(lendingMarketId: number): Promise<AssetPoolState[]>;
+};
+
+type UserBalanceDependencies = {
+  readWalletRecord?: typeof readWalletRecord;
+  createContracts?: (network: RuntimeNetwork) => UserBalanceContracts;
+};
+
+export type UserBalanceAsset = {
+  symbol: string;
+  name: string;
+  address: string;
+  decimals: number;
+  price: string;
+  assetWeight: string;
+  balance: string;
+  balanceUsd: string;
+  balanceUsdDisplay: string;
+  balanceBorrowed: string;
+  balanceBorrowedUsd: string;
+  balanceBorrowedUsdDisplay: string;
+  borrowInterest: string;
+  borrowInterestUsd: string;
+};
+
+export type UserBalanceToolResult =
+  | {
+      status: 'unavailable';
+      network: RuntimeNetwork;
+      summary: string;
+    }
+  | {
+      status: 'success';
+      network: RuntimeNetwork;
+      walletAddress: string;
+      subaccountAddress: string;
+      netValue: string;
+      netValueDisplay: string;
+      totalValue: string;
+      totalValueDisplay: string;
+      totalDeposits: string;
+      totalDepositsDisplay: string;
+      totalBorrowed: string;
+      totalBorrowedDisplay: string;
+      totalUnrealizedPnl: string;
+      totalUnrealizedPnlDisplay: string;
+      marginRatio: string;
+      totalCollateral: string;
+      totalMarginRequired: string;
+      totalMaintenanceMarginRequired: string;
+      assets: UserBalanceAsset[];
+      summary: string;
+    };
+
+const NETWORK_BALANCE_TOKENS: Record<RuntimeNetwork, BalanceToken[]> = {
+  deepx_devnet: [
+    {
+      name: 'USDC',
+      symbol: 'USDC',
+      address: '0x9eb03d8ac62ae18398ced13c033db78b905ad8c9',
+      decimals: 6,
+      marketId: 1,
+    },
+    {
+      name: 'ETH',
+      symbol: 'ETH',
+      address: '0xD6c9c7078fc1Fe5065bc85f4743FAB219Bb053fd',
+      decimals: 18,
+      marketId: 3,
+    },
+    {
+      name: 'SOL',
+      symbol: 'SOL',
+      address: '0x1fa7329ef1dae5c4b734b337c83466316f3bae94',
+      decimals: 9,
+      marketId: 4,
+    },
+  ],
+  deepx_testnet: [
+    {
+      name: 'USDC',
+      symbol: 'USDC',
+      address: '0x9eb03d8ac62ae18398ced13c033db78b905ad8c9',
+      decimals: 6,
+      marketId: 1,
+    },
+    {
+      name: 'ETH',
+      symbol: 'ETH',
+      address: '0x123ae070eb84068b5fed9f5b99f236507c44c880',
+      decimals: 18,
+      marketId: 3,
+    },
+    {
+      name: 'SOL',
+      symbol: 'SOL',
+      address: '0x1fa7329ef1dae5c4b734b337c83466316f3bae94',
+      decimals: 9,
+      marketId: 4,
+    },
+  ],
+};
+
+export async function getUserBalanceTool(
+  input: {
+    network?: RuntimeNetwork;
+  } = {},
+  dependencies: UserBalanceDependencies = {},
+): Promise<UserBalanceToolResult> {
+  const network = input.network ?? 'deepx_devnet';
+  const loadWalletRecord = dependencies.readWalletRecord ?? readWalletRecord;
+  const walletRecord = await loadWalletRecord(network);
+
+  if (!walletRecord) {
+    return {
+      status: 'unavailable',
+      network,
+      summary: `No local wallet found for ${network}. Import or unlock a wallet first.`,
+    };
+  }
+
+  const contracts =
+    dependencies.createContracts?.(network) ??
+    createUserBalanceContracts(network);
+
+  return fetchUserBalance({
+    network,
+    walletAddress: walletRecord.address,
+    subaccountAddress: walletRecord.address,
+    contracts,
+  });
+}
+
+export async function fetchUserBalance(input: {
+  network: RuntimeNetwork;
+  walletAddress: string;
+  subaccountAddress: string;
+  contracts: UserBalanceContracts;
+}): Promise<Extract<UserBalanceToolResult, { status: 'success' }>> {
+  const balanceTokens = NETWORK_BALANCE_TOKENS[input.network];
+  const perpMarkets = getMarketPairs(getNetworkConfig(input.network))
+    .filter((pair) => pair.kind === 'perp')
+    .map((pair) => ({
+      marketId: pair.marketId ?? Number(pair.pairId),
+      baseDecimals: pair.baseDecimals,
+    }));
+
+  const [
+    accountInfo,
+    maintenanceMargin,
+    initialMargin,
+    oraclePrices,
+    assetPools,
+    positions,
+  ] = await Promise.all([
+    input.contracts.subaccountInfo(input.subaccountAddress),
+    input.contracts.totalCollateralAndMarginRequiredFor(
+      input.subaccountAddress,
+      1,
+    ),
+    input.contracts.totalCollateralAndMarginRequiredFor(
+      input.subaccountAddress,
+      0,
+    ),
+    input.contracts.getOraclePriceAll(),
+    input.contracts.assetPools(LENDING_MARKET_ID),
+    input.contracts.userPerpPositions(
+      input.subaccountAddress,
+      perpMarkets.map((pair) => pair.marketId),
+    ),
+  ]);
+
+  const oraclePriceBySymbol = new Map(
+    oraclePrices.map((price) => [
+      normalizeOracleSymbol(price.symbol),
+      price.price,
+    ]),
+  );
+  const assetWeightByMarketId = new Map(
+    assetPools.map((pool) => [pool.market_id, pool.initial_asset_weight]),
+  );
+
+  const assets = balanceTokens.map((token) => {
+    const spotPosition = accountInfo.spot_positions.find(
+      (position) =>
+        normalizeOracleSymbol(position.symbol) === token.symbol.toUpperCase(),
+    );
+    const borrowPosition = accountInfo.borrow_positions.find(
+      (position) =>
+        safeDecodeBytes(position.asset).toLowerCase() ===
+        token.symbol.toLowerCase(),
+    );
+    const priceRaw =
+      oraclePriceBySymbol.get(token.symbol.toUpperCase()) ??
+      (token.symbol === 'USDC' ? 10n ** BigInt(USD_DECIMALS) : 0n);
+    const assetWeightRaw =
+      assetWeightByMarketId.get(token.marketId) ??
+      10n ** BigInt(ASSET_WEIGHT_DECIMALS);
+    const balanceRaw = spotPosition?.token_amount ?? 0n;
+    const balanceBorrowedRaw = borrowPosition?.amount ?? 0n;
+    const borrowInterestRaw = borrowPosition?.interest ?? 0n;
+    const balanceUsdRaw = multiplyAmountByPrice(
+      balanceRaw,
+      token.decimals,
+      priceRaw,
+    );
+    const balanceBorrowedUsdRaw = multiplyAmountByPrice(
+      balanceBorrowedRaw,
+      token.decimals,
+      priceRaw,
+    );
+    const borrowInterestUsdRaw = multiplyAmountByPrice(
+      borrowInterestRaw,
+      token.decimals,
+      priceRaw,
+    );
+
+    return {
+      symbol: token.symbol,
+      name: token.name,
+      address: token.address,
+      decimals: token.decimals,
+      price: formatUnits(priceRaw, USD_DECIMALS),
+      assetWeight: formatUnits(assetWeightRaw, ASSET_WEIGHT_DECIMALS),
+      balance: formatUnits(balanceRaw, token.decimals),
+      balanceUsd: formatUnits(balanceUsdRaw, USD_DECIMALS),
+      balanceUsdDisplay: formatUsdDisplay(balanceUsdRaw),
+      balanceBorrowed: formatUnits(balanceBorrowedRaw, token.decimals),
+      balanceBorrowedUsd: formatUnits(balanceBorrowedUsdRaw, USD_DECIMALS),
+      balanceBorrowedUsdDisplay: formatUsdDisplay(balanceBorrowedUsdRaw),
+      borrowInterest: formatUnits(borrowInterestRaw, token.decimals),
+      borrowInterestUsd: formatUnits(borrowInterestUsdRaw, USD_DECIMALS),
+      _balanceUsdRaw: balanceUsdRaw,
+      _balanceBorrowedUsdRaw: balanceBorrowedUsdRaw,
+    };
+  });
+
+  const totalDepositsRaw = assets.reduce(
+    (sum, asset) => sum + asset._balanceUsdRaw,
+    0n,
+  );
+  const totalBorrowedRaw = assets.reduce(
+    (sum, asset) => sum + asset._balanceBorrowedUsdRaw,
+    0n,
+  );
+  const totalUnrealizedPnlRaw = positions.reduce((sum, position) => {
+    const currentPriceRaw =
+      oraclePriceBySymbol.get(marketSymbolFor(position.market_id)) ?? 0n;
+    const market = perpMarkets.find(
+      (candidate) => candidate.marketId === position.market_id,
+    );
+    if (!market) {
+      return sum;
+    }
+
+    let pnlRaw = multiplyAmountByPriceDifference(
+      position.base_asset_amount,
+      market.baseDecimals,
+      currentPriceRaw - position.entry_price,
+    );
+    if (!position.is_long) {
+      pnlRaw *= -1n;
+    }
+
+    return sum + pnlRaw;
+  }, 0n);
+
+  const totalValueRaw =
+    totalUnrealizedPnlRaw + totalDepositsRaw - totalBorrowedRaw;
+  const netValueRaw = initialMargin.collateral - initialMargin.margin_required;
+  const marginRatio =
+    maintenanceMargin.collateral > 0n && maintenanceMargin.margin_required > 0n
+      ? formatRatio(
+          maintenanceMargin.collateral,
+          maintenanceMargin.margin_required,
+          2,
+        )
+      : '-1';
+
+  const summarizedAssets = assets.map(
+    ({
+      _balanceBorrowedUsdRaw: _ignoredBorrow,
+      _balanceUsdRaw: _ignored,
+      ...asset
+    }) => asset,
+  );
+
+  return {
+    status: 'success',
+    network: input.network,
+    walletAddress: input.walletAddress,
+    subaccountAddress: input.subaccountAddress,
+    netValue: formatUnits(netValueRaw, USD_DECIMALS),
+    netValueDisplay: formatUsdDisplay(netValueRaw),
+    totalValue: formatUnits(totalValueRaw, USD_DECIMALS),
+    totalValueDisplay: formatUsdDisplay(totalValueRaw),
+    totalDeposits: formatUnits(totalDepositsRaw, USD_DECIMALS),
+    totalDepositsDisplay: formatUsdDisplay(totalDepositsRaw),
+    totalBorrowed: formatUnits(totalBorrowedRaw, USD_DECIMALS),
+    totalBorrowedDisplay: formatUsdDisplay(totalBorrowedRaw),
+    totalUnrealizedPnl: formatUnits(totalUnrealizedPnlRaw, USD_DECIMALS),
+    totalUnrealizedPnlDisplay: formatUsdDisplay(totalUnrealizedPnlRaw),
+    totalCollateral: formatUnits(initialMargin.collateral, USD_DECIMALS),
+    totalMarginRequired: formatUnits(
+      initialMargin.margin_required,
+      USD_DECIMALS,
+    ),
+    totalMaintenanceMarginRequired: formatUnits(
+      maintenanceMargin.margin_required,
+      USD_DECIMALS,
+    ),
+    marginRatio,
+    assets: summarizedAssets,
+    summary: buildBalanceSummary({
+      network: input.network,
+      walletAddress: input.walletAddress,
+      totalValueRaw,
+      netValueRaw,
+      totalDepositsRaw,
+      totalBorrowedRaw,
+      totalUnrealizedPnlRaw,
+      marginRatio,
+    }),
+  };
+}
+
+function createUserBalanceContracts(
+  network: RuntimeNetwork,
+): UserBalanceContracts {
+  const provider = new JsonRpcProvider(getNetworkConfig(network).rpcUrl);
+  const subaccountContract = new Contract(
+    SUBACCOUNT_CONTRACT_ADDRESS,
+    SUBACCOUNT_ABI,
+    provider,
+  );
+  const perpContract = new Contract(PERP_CONTRACT_ADDRESS, PERP_ABI, provider);
+  const lendingContract = new Contract(
+    LENDING_CONTRACT_ADDRESS,
+    LENDING_ABI,
+    provider,
+  );
+
+  return {
+    subaccountInfo(account) {
+      return subaccountContract.subaccountInfo(
+        account,
+      ) as Promise<UserSubaccountInfo>;
+    },
+    getOraclePriceAll() {
+      return perpContract.getOraclePriceAll() as Promise<OraclePrice[]>;
+    },
+    totalCollateralAndMarginRequiredFor(account, weightDirection) {
+      return perpContract.totalCollateralAndMarginRequiredFor(
+        account,
+        weightDirection,
+      ) as Promise<TotalCollateralAndMargin>;
+    },
+    userPerpPositions(account, marketIds) {
+      return perpContract.userPerpPositions(account, marketIds) as Promise<
+        RawPerpPosition[]
+      >;
+    },
+    assetPools(lendingMarketId) {
+      return lendingContract.assetPools(lendingMarketId) as Promise<
+        AssetPoolState[]
+      >;
+    },
+  };
+}
+
+function normalizeOracleSymbol(value: string) {
+  return safeDecodeBytes(value).split('-')[0]?.toUpperCase() ?? '';
+}
+
+function safeDecodeBytes(value: string) {
+  try {
+    return toUtf8String(value).replaceAll('\u0000', '').trim();
+  } catch {
+    return value;
+  }
+}
+
+function multiplyAmountByPrice(
+  amountRaw: bigint,
+  amountDecimals: number,
+  priceRaw: bigint,
+) {
+  return (amountRaw * priceRaw) / 10n ** BigInt(amountDecimals);
+}
+
+function multiplyAmountByPriceDifference(
+  amountRaw: bigint,
+  amountDecimals: number,
+  priceDifferenceRaw: bigint,
+) {
+  return (amountRaw * priceDifferenceRaw) / 10n ** BigInt(amountDecimals);
+}
+
+function formatRatio(
+  collateral: bigint,
+  marginRequired: bigint,
+  decimals: number,
+) {
+  const scale = 10n ** BigInt(decimals);
+  const scaledValue = (collateral * scale) / marginRequired;
+  return fixedFromScaledInteger(scaledValue, decimals);
+}
+
+function formatUsdDisplay(value: bigint) {
+  const prefix = value < 0n ? '-$' : '$';
+  const absolute = value < 0n ? value * -1n : value;
+  return `${prefix}${addThousandsSeparators(
+    fixedFromScaledInteger(absolute, USD_DECIMALS, 2),
+  )}`;
+}
+
+function fixedFromScaledInteger(
+  value: bigint,
+  scaleDecimals: number,
+  outputDecimals = scaleDecimals,
+) {
+  const negative = value < 0n;
+  const absolute = negative ? value * -1n : value;
+  const raw = absolute.toString().padStart(scaleDecimals + 1, '0');
+  const integerPart = raw.slice(0, -scaleDecimals) || '0';
+  const decimalPart = raw.slice(-scaleDecimals);
+  const trimmedDecimalPart =
+    outputDecimals === 0
+      ? ''
+      : decimalPart.padEnd(outputDecimals, '0').slice(0, outputDecimals);
+
+  if (!trimmedDecimalPart) {
+    return `${negative ? '-' : ''}${integerPart}`;
+  }
+
+  return `${negative ? '-' : ''}${integerPart}.${trimmedDecimalPart}`;
+}
+
+function addThousandsSeparators(value: string) {
+  const [integerPart, decimalPart] = value.split('.');
+  const grouped = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return decimalPart ? `${grouped}.${decimalPart}` : grouped;
+}
+
+function buildBalanceSummary(input: {
+  network: RuntimeNetwork;
+  walletAddress: string;
+  totalValueRaw: bigint;
+  netValueRaw: bigint;
+  totalDepositsRaw: bigint;
+  totalBorrowedRaw: bigint;
+  totalUnrealizedPnlRaw: bigint;
+  marginRatio: string;
+}) {
+  const marginLabel =
+    input.marginRatio === '-1'
+      ? 'margin ratio is not constrained'
+      : `margin ratio ${input.marginRatio}`;
+
+  return [
+    `${input.network} balance for ${input.walletAddress}:`,
+    `total value ${formatUsdDisplay(input.totalValueRaw)}`,
+    `net value ${formatUsdDisplay(input.netValueRaw)}`,
+    `deposits ${formatUsdDisplay(input.totalDepositsRaw)}`,
+    `borrowed ${formatUsdDisplay(input.totalBorrowedRaw)}`,
+    `unrealized PnL ${formatUsdDisplay(input.totalUnrealizedPnlRaw)}`,
+    marginLabel,
+  ].join(', ');
+}
+
+function marketSymbolFor(marketId: number) {
+  switch (marketId) {
+    case 3:
+      return 'ETH';
+    case 4:
+      return 'SOL';
+    default:
+      return '';
+  }
+}

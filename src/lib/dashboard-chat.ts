@@ -75,6 +75,7 @@ export function buildChatSystemPrompt(context: ChatPromptContext): string {
     'Respond in plain text only.',
     'Keep answers concise and terminal-friendly.',
     'Use the available DeepX tools when they improve accuracy for markets or orders.',
+    'Use deepx_get_user_balance when the user asks about balance, collateral, borrowing, or current account exposure.',
     'Use deepx_place_order for live perp order placement only when the user explicitly wants execution.',
     'Use deepx_close_position for position exits and deepx_update_position for take-profit or stop-loss changes when those actions are requested.',
     context.walletUnlocked
