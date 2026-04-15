@@ -8,9 +8,9 @@ import {
 } from 'ethers';
 
 import { getNetworkConfig, type RuntimeNetwork } from '../config/networks';
-import { logNetworkRequest, logNetworkResponse } from './logger';
 import { getMarketPairs, type MarketPair } from './market-catalog';
 import { resolvePrimarySubaccountAddress } from './subaccount-contract';
+import { submitRpcTransaction } from './transaction-submission';
 import { decryptPrivateKey, readWalletRecord } from './wallet-store';
 
 const SPOT_CONTRACT_ADDRESS = '0x000000000000000000000000000000000000044d';
@@ -93,7 +93,7 @@ export async function placeSpotOrderLive(input: PlaceSpotOrderInput): Promise<{
     chainId: network.chainId,
     gasLimit: 1000000n,
   });
-  const txHash = await submitRpcTransaction({
+  const { txHash } = await submitRpcTransaction({
     network,
     provider,
     signedTx,
@@ -275,48 +275,6 @@ function normalizeSlippage(value?: string | number) {
   }
 
   return Number(normalized);
-}
-
-async function submitRpcTransaction(input: {
-  network: ReturnType<typeof getNetworkConfig>;
-  provider: JsonRpcProvider;
-  signedTx: string;
-}) {
-  logNetworkRequest({
-    scope: 'rpc',
-    method: 'POST',
-    url: input.network.rpcUrl,
-    body: JSON.stringify({
-      method: 'eth_sendRawTransaction',
-      signedTx: input.signedTx,
-    }),
-  });
-  try {
-    const response = await input.provider.broadcastTransaction(input.signedTx);
-    logNetworkResponse({
-      scope: 'rpc',
-      method: 'POST',
-      url: input.network.rpcUrl,
-      status: 200,
-      body: JSON.stringify({
-        txHash: response.hash,
-      }),
-    });
-    return response.hash;
-  } catch (error) {
-    const message =
-      error instanceof Error && error.message.trim()
-        ? `RPC transaction submission failed: ${error.message.trim()}`
-        : 'RPC transaction submission failed.';
-    logNetworkResponse({
-      scope: 'rpc',
-      method: 'POST',
-      url: input.network.rpcUrl,
-      status: 500,
-      body: message,
-    });
-    throw new Error(message, { cause: error });
-  }
 }
 
 function buildSubmittedSpotOrderSummary(input: {

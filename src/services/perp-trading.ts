@@ -1,8 +1,14 @@
 import { Contract, JsonRpcProvider, parseUnits, Wallet } from 'ethers';
 
 import { getNetworkConfig, type RuntimeNetwork } from '../config/networks';
-import { logNetworkRequest, logNetworkResponse } from './logger';
 import { resolvePrimarySubaccountAddress } from './subaccount-contract';
+import { submitRpcTransaction } from './transaction-submission';
+
+export {
+  formatRpcFailureMessage,
+  getTransactionSubmissionRpcUrl,
+} from './transaction-submission';
+
 import { decryptPrivateKey, readWalletRecord } from './wallet-store';
 
 const PERP_CONTRACT_ADDRESS = '0x000000000000000000000000000000000000044E';
@@ -148,7 +154,7 @@ export async function placePerpOrderLive(input: PlacePerpOrderInput): Promise<{
     gasLimit: 1000000n,
   });
 
-  const txHash = await submitRpcTransaction({
+  const { txHash } = await submitRpcTransaction({
     network,
     provider,
     signedTx,
@@ -241,7 +247,7 @@ export async function cancelPerpOrderLive(
     gasLimit: 1000000n,
   });
 
-  const txHash = await submitRpcTransaction({
+  const { txHash } = await submitRpcTransaction({
     network,
     provider,
     signedTx,
@@ -306,7 +312,7 @@ export async function closePerpPositionLive(
     gasLimit: 1000000n,
   });
 
-  const txHash = await submitRpcTransaction({
+  const { txHash } = await submitRpcTransaction({
     network,
     provider,
     signedTx,
@@ -375,7 +381,7 @@ export async function updatePerpPositionLive(
     gasLimit: 1000000n,
   });
 
-  const txHash = await submitRpcTransaction({
+  const { txHash } = await submitRpcTransaction({
     network,
     provider,
     signedTx,
@@ -453,62 +459,6 @@ function parseNonNegativeDecimal(
   }
 
   return parseUnits(normalized, decimals);
-}
-
-async function submitRpcTransaction(input: {
-  network: ReturnType<typeof getNetworkConfig>;
-  provider: JsonRpcProvider;
-  signedTx: string;
-}) {
-  logNetworkRequest({
-    scope: 'rpc',
-    method: 'POST',
-    url: input.network.rpcUrl,
-    body: JSON.stringify({
-      method: 'eth_sendRawTransaction',
-      signedTx: input.signedTx,
-    }),
-  });
-  try {
-    const response = await input.provider.broadcastTransaction(input.signedTx);
-    logNetworkResponse({
-      scope: 'rpc',
-      method: 'POST',
-      url: input.network.rpcUrl,
-      status: 200,
-      body: JSON.stringify({
-        txHash: response.hash,
-      }),
-    });
-    return response.hash;
-  } catch (error) {
-    const message = formatRpcFailureMessage(error);
-    logNetworkResponse({
-      scope: 'rpc',
-      method: 'POST',
-      url: input.network.rpcUrl,
-      status: 500,
-      body: message,
-    });
-    throw new Error(message, { cause: error });
-  }
-}
-
-export function getTransactionSubmissionRpcUrl(
-  network: ReturnType<typeof getNetworkConfig>,
-) {
-  return network.rpcUrl;
-}
-
-export function formatRpcFailureMessage(error: unknown) {
-  if (error instanceof Error) {
-    const message = error.message.trim();
-    if (message) {
-      return `RPC transaction submission failed: ${message}`;
-    }
-  }
-
-  return 'RPC transaction submission failed.';
 }
 
 function truncateTxHash(txHash: string) {
