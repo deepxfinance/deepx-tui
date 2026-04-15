@@ -175,7 +175,7 @@ async function executeToolCall(call: FunctionCall) {
   try {
     return {
       output: await executeDeepxAgentTool(call.name ?? '', call.args ?? {}, {
-        allowLiveExecution: call.name === 'deepx_place_order',
+        allowLiveExecution: false,
       }),
     };
   } catch (error) {

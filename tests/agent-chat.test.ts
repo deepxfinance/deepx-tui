@@ -274,7 +274,6 @@ describe('agent chat service', () => {
                     type: 'LIMIT',
                     size: '1',
                     price: '1000',
-                    passphrase: 'session-secret',
                     confirm: false,
                   },
                 },
@@ -341,6 +340,84 @@ describe('agent chat service', () => {
                   'Network: DEVNET\n' +
                   'Explorer:\n' +
                   'http://explorer-devnetx.deepx.fi/tx',
+              },
+            },
+          },
+        },
+      ],
+    });
+  });
+
+  test('blocks AI place-order tool calls that try to confirm directly', async () => {
+    const calls: GenerateContentParameters[] = [];
+    const client: GenAiClientLike = {
+      models: {
+        async generateContent(input) {
+          calls.push(input);
+
+          if (calls.length === 1) {
+            return {
+              functionCalls: [
+                {
+                  id: 'call-5',
+                  name: 'deepx_place_order',
+                  args: {
+                    network: 'deepx_devnet',
+                    pair: 'ETH-USDC',
+                    side: 'BUY',
+                    type: 'LIMIT',
+                    size: '1',
+                    price: '1000',
+                    confirm: true,
+                  },
+                },
+              ],
+            };
+          }
+
+          return {
+            text: 'Please confirm the staged order in the terminal before I submit it.',
+          };
+        },
+      },
+    };
+
+    const result = await requestAgentChat({
+      messages: [
+        { id: 'user-1', role: 'user', content: 'Submit that order now.' },
+      ],
+      context: {
+        pairLabel: 'ETH-USDC',
+        priceLabel: '1000.00',
+        resolutionLabel: '15m',
+        walletUnlocked: true,
+      },
+      client,
+    });
+
+    expect(result).toBe(
+      'Please confirm the staged order in the terminal before I submit it.',
+    );
+    const secondCallContents = calls[1]?.contents as Content[];
+    expect(secondCallContents.at(-1)).toEqual({
+      role: 'user',
+      parts: [
+        {
+          functionResponse: {
+            id: 'call-5',
+            name: 'deepx_place_order',
+            response: {
+              output: {
+                status: 'blocked',
+                network: 'deepx_devnet',
+                pair: 'ETH-USDC',
+                orderId: undefined,
+                summary:
+                  'Live order placement is disabled in AI chat for ETH-USDC.',
+                warnings: [
+                  'AI chat is advisory-only for trading actions.',
+                  'Use an explicit order-entry workflow for any live submission or cancellation.',
+                ],
               },
             },
           },

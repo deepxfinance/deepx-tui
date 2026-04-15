@@ -23,7 +23,8 @@ describe('dashboard chat', () => {
     expect(prompt).toContain('BTC-USDC');
     expect(prompt).toContain('already unlocked');
     expect(prompt).toContain('status=submitted');
-    expect(prompt).toContain('Do not ask for the passphrase again');
+    expect(prompt).toContain('never set confirm=true from AI chat');
+    expect(prompt).toContain('requires the user to confirm in the terminal');
     expect(prompt).toContain('always include that transaction explorer link');
     expect(prompt).toContain('compact terminal-friendly block');
     expect(prompt).toContain('Use uppercase BUY or SELL exactly');
