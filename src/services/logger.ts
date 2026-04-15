@@ -1,4 +1,6 @@
-import { useSyncExternalStore } from 'react';
+import { appendFileSync, mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -20,6 +22,7 @@ const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
 };
 
 let minLogLevel: LogLevel = 'warn';
+let fileLoggingEnabled = false;
 
 let nextLogId = 1;
 let entries: LogEntry[] = [];
@@ -27,6 +30,7 @@ const listeners = new Set<() => void>();
 
 export function setLoggerMode(mode: 'default' | 'debug') {
   minLogLevel = mode === 'debug' ? 'debug' : 'warn';
+  fileLoggingEnabled = mode === 'debug';
 }
 
 export function logDebug(scope: string, message: string, details?: string) {
@@ -112,14 +116,20 @@ export function subscribeToLogs(listener: () => void) {
   };
 }
 
-export function useLogEntries() {
-  return useSyncExternalStore(subscribeToLogs, getLogEntries, getLogEntries);
-}
-
 export function clearLogs() {
   entries = [];
   nextLogId = 1;
   emitLogChange();
+}
+
+export function getDebugLogFilePath() {
+  if (process.env.DEEPX_DEBUG_LOG_FILE?.trim()) {
+    return process.env.DEEPX_DEBUG_LOG_FILE.trim();
+  }
+
+  const stateRoot =
+    process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state');
+  return join(stateRoot, 'deepx', 'logs', 'debug.log');
 }
 
 function appendLog(
@@ -132,17 +142,17 @@ function appendLog(
     return;
   }
 
-  entries = [
-    ...entries,
-    {
-      id: nextLogId++,
-      timestamp: new Date().toISOString(),
-      level,
-      scope,
-      message,
-      details,
-    },
-  ].slice(-MAX_LOG_ENTRIES);
+  const entry = {
+    id: nextLogId++,
+    timestamp: new Date().toISOString(),
+    level,
+    scope,
+    message,
+    details,
+  } satisfies LogEntry;
+
+  entries = [...entries, entry].slice(-MAX_LOG_ENTRIES);
+  writeLogEntryToFile(entry);
   emitLogChange();
 }
 
@@ -165,6 +175,16 @@ function formatPayload(value?: string) {
 
 function shouldCapture(level: LogLevel) {
   return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[minLogLevel];
+}
+
+function writeLogEntryToFile(entry: LogEntry) {
+  if (!fileLoggingEnabled) {
+    return;
+  }
+
+  const filePath = getDebugLogFilePath();
+  mkdirSync(dirname(filePath), { recursive: true });
+  appendFileSync(filePath, `${JSON.stringify(entry)}\n`, 'utf8');
 }
 
 function redactSensitivePayload(value: string) {

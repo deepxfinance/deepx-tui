@@ -2,8 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import type { Content, GenerateContentParameters } from '@google/genai';
 
 import {
+  buildCancelledAgentActionResult,
+  continueAgentChatAfterUserAction,
   type GenAiClientLike,
   requestAgentChat,
+  requestAgentChatWithActions,
 } from '../src/services/agent-chat';
 
 describe('agent chat service', () => {
@@ -23,6 +26,7 @@ describe('agent chat service', () => {
     const result = await requestAgentChat({
       messages: [{ id: 'user-1', role: 'user', content: 'What changed?' }],
       context: {
+        network: 'deepx_devnet',
         pairLabel: 'BTC-USDC',
         priceLabel: '68250.40',
         resolutionLabel: '15m',
@@ -36,7 +40,7 @@ describe('agent chat service', () => {
     const firstCall = calls[0];
     expect(firstCall).toBeDefined();
     expect(firstCall?.config?.systemInstruction).toContain(
-      'Active pair: BTC-USDC.',
+      'Chart resolution: 15m.',
     );
   });
 
@@ -71,6 +75,7 @@ describe('agent chat service', () => {
         { id: 'user-1', role: 'user', content: 'Do I have open orders?' },
       ],
       context: {
+        network: 'deepx_devnet',
         pairLabel: 'BTC-USDC',
         priceLabel: '68250.40',
         resolutionLabel: '15m',
@@ -163,6 +168,7 @@ describe('agent chat service', () => {
         { id: 'user-1', role: 'user', content: 'Check open orders again.' },
       ],
       context: {
+        network: 'deepx_devnet',
         pairLabel: 'BTC-USDC',
         priceLabel: '68250.40',
         resolutionLabel: '15m',
@@ -200,14 +206,9 @@ describe('agent chat service', () => {
               functionCalls: [
                 {
                   id: 'call-2',
-                  name: 'deepx_place_order',
+                  name: 'deepx_missing_tool',
                   args: {
                     network: 'deepx_devnet',
-                    pair: 'ETH-USDC',
-                    side: 'BUY',
-                    type: 'LIMIT',
-                    size: '0',
-                    price: '1000',
                   },
                 },
               ],
@@ -215,15 +216,18 @@ describe('agent chat service', () => {
           }
 
           return {
-            text: 'The requested order was invalid because size must be positive.',
+            text: 'The requested tool is unavailable.',
           };
         },
       },
     };
 
     const result = await requestAgentChat({
-      messages: [{ id: 'user-1', role: 'user', content: 'Plan a bad order.' }],
+      messages: [
+        { id: 'user-1', role: 'user', content: 'Use a missing tool.' },
+      ],
       context: {
+        network: 'deepx_devnet',
         pairLabel: 'BTC-USDC',
         priceLabel: '68250.40',
         resolutionLabel: '15m',
@@ -232,9 +236,7 @@ describe('agent chat service', () => {
       client,
     });
 
-    expect(result).toBe(
-      'The requested order was invalid because size must be positive.',
-    );
+    expect(result).toBe('The requested tool is unavailable.');
     const secondCallContents = calls[1]?.contents as Content[];
     expect(secondCallContents.at(-1)).toEqual({
       role: 'user',
@@ -242,10 +244,10 @@ describe('agent chat service', () => {
         {
           functionResponse: {
             id: 'call-2',
-            name: 'deepx_place_order',
+            name: 'deepx_missing_tool',
             response: {
               error: {
-                message: 'Invalid size. Expected a positive number.',
+                message: 'Unknown tool "deepx_missing_tool".',
               },
             },
           },
@@ -254,7 +256,7 @@ describe('agent chat service', () => {
     });
   });
 
-  test('allows AI place-order tool calls to reach live execution guards', async () => {
+  test('pauses for user action when AI place-order confirmation is missing', async () => {
     const calls: GenerateContentParameters[] = [];
     const client: GenAiClientLike = {
       models: {
@@ -274,7 +276,6 @@ describe('agent chat service', () => {
                     type: 'LIMIT',
                     size: '1',
                     price: '1000',
-                    passphrase: 'session-secret',
                     confirm: false,
                   },
                 },
@@ -282,18 +283,17 @@ describe('agent chat service', () => {
             };
           }
 
-          return {
-            text: 'Live placement needs confirm=true before submission.',
-          };
+          throw new Error('The model should not continue before confirmation.');
         },
       },
     };
 
-    const result = await requestAgentChat({
+    const result = await requestAgentChatWithActions({
       messages: [
         { id: 'user-1', role: 'user', content: 'Submit that order now.' },
       ],
       context: {
+        network: 'deepx_devnet',
         pairLabel: 'ETH-USDC',
         priceLabel: '1000.00',
         resolutionLabel: '15m',
@@ -302,18 +302,228 @@ describe('agent chat service', () => {
       client,
     });
 
-    expect(result).toBe('Live placement needs confirm=true before submission.');
+    expect(result.kind).toBe('needs_user_action');
+    if (result.kind !== 'needs_user_action') {
+      throw new Error('Expected pending user action.');
+    }
+    expect(result.action).toMatchObject({
+      id: 'call-4',
+      toolName: 'deepx_place_order',
+      title: 'Confirm order',
+      requiresPassphrase: true,
+      args: {
+        network: 'deepx_devnet',
+        pair: 'ETH-USDC',
+        side: 'BUY',
+        type: 'LIMIT',
+        size: '1',
+        price: '1000',
+        confirm: false,
+      },
+    });
+    expect(result.action.summaryLines).toContain('Action: BUY 1 ETH-USDC');
+    expect(calls).toHaveLength(1);
+  });
+
+  test('does not let AI-supplied confirm=true bypass user action', async () => {
+    const calls: GenerateContentParameters[] = [];
+    const client: GenAiClientLike = {
+      models: {
+        async generateContent(input) {
+          calls.push(input);
+
+          if (calls.length === 1) {
+            return {
+              functionCalls: [
+                {
+                  id: 'call-5',
+                  name: 'deepx_place_order',
+                  args: {
+                    network: 'deepx_devnet',
+                    pair: 'ETH-USDC',
+                    side: 'BUY',
+                    type: 'LIMIT',
+                    size: '1',
+                    price: '1000',
+                    confirm: true,
+                  },
+                },
+              ],
+            };
+          }
+
+          throw new Error('The model should not continue before confirmation.');
+        },
+      },
+    };
+
+    const result = await requestAgentChatWithActions({
+      messages: [
+        { id: 'user-1', role: 'user', content: 'Submit that order now.' },
+      ],
+      context: {
+        network: 'deepx_devnet',
+        pairLabel: 'ETH-USDC',
+        priceLabel: '1000.00',
+        resolutionLabel: '15m',
+        walletUnlocked: true,
+      },
+      client,
+    });
+
+    expect(result.kind).toBe('needs_user_action');
+    if (result.kind !== 'needs_user_action') {
+      throw new Error('Expected pending user action.');
+    }
+    expect(result.action.args).toMatchObject({
+      confirm: true,
+      pair: 'ETH-USDC',
+      size: '1',
+    });
+    expect(calls).toHaveLength(1);
+  });
+
+  test('resumes the agent after a user cancels a pending action', async () => {
+    const calls: GenerateContentParameters[] = [];
+    const client: GenAiClientLike = {
+      models: {
+        async generateContent(input) {
+          calls.push(input);
+
+          if (calls.length === 1) {
+            return {
+              functionCalls: [
+                {
+                  id: 'call-6',
+                  name: 'deepx_place_order',
+                  args: {
+                    network: 'deepx_devnet',
+                    pair: 'ETH-USDC',
+                    side: 'BUY',
+                    type: 'LIMIT',
+                    size: '1',
+                    price: '1000',
+                  },
+                },
+              ],
+            };
+          }
+
+          return {
+            text: 'Cancelled. No transaction was submitted.',
+          };
+        },
+      },
+    };
+
+    const pending = await requestAgentChatWithActions({
+      messages: [
+        { id: 'user-1', role: 'user', content: 'Submit that order now.' },
+      ],
+      context: {
+        network: 'deepx_devnet',
+        pairLabel: 'ETH-USDC',
+        priceLabel: '1000.00',
+        resolutionLabel: '15m',
+        walletUnlocked: true,
+      },
+      client,
+    });
+    if (pending.kind !== 'needs_user_action') {
+      throw new Error('Expected pending user action.');
+    }
+
+    const result = await continueAgentChatAfterUserAction({
+      continuation: pending.continuation,
+      actionResult: buildCancelledAgentActionResult(pending.action),
+      client,
+    });
+
+    expect(result).toEqual({
+      kind: 'final',
+      reply: 'Cancelled. No transaction was submitted.',
+      stagedOrder: undefined,
+    });
     const secondCallContents = calls[1]?.contents as Content[];
     expect(secondCallContents.at(-1)).toEqual({
       role: 'user',
       parts: [
         {
           functionResponse: {
-            id: 'call-4',
+            id: 'call-6',
             name: 'deepx_place_order',
             response: {
-              error: {
-                message: 'Live order submission requires confirm=true.',
+              output: {
+                status: 'cancelled',
+                toolName: 'deepx_place_order',
+                summary: 'User cancelled this action in the terminal.',
+              },
+            },
+          },
+        },
+      ],
+    });
+  });
+
+  test('defaults omitted tool network to the current session network', async () => {
+    const calls: GenerateContentParameters[] = [];
+    const client: GenAiClientLike = {
+      models: {
+        async generateContent(input) {
+          calls.push(input);
+
+          if (calls.length === 1) {
+            return {
+              functionCalls: [
+                {
+                  id: 'call-9',
+                  name: 'deepx_list_open_orders',
+                  args: {},
+                },
+              ],
+            };
+          }
+
+          return {
+            text: 'Used session network.',
+          };
+        },
+      },
+    };
+
+    const result = await requestAgentChat({
+      messages: [
+        {
+          id: 'user-1',
+          role: 'user',
+          content: 'Check open orders on this session.',
+        },
+      ],
+      context: {
+        network: 'deepx_testnet',
+        pairLabel: 'BTC-USDC',
+        priceLabel: '68250.40',
+        resolutionLabel: '15m',
+        walletUnlocked: true,
+      },
+      client,
+    });
+
+    expect(result).toBe('Used session network.');
+    const secondCallContents = calls[1]?.contents as Content[];
+    expect(secondCallContents.at(-1)).toEqual({
+      role: 'user',
+      parts: [
+        {
+          functionResponse: {
+            id: 'call-9',
+            name: 'deepx_list_open_orders',
+            response: {
+              output: {
+                network: 'deepx_testnet',
+                orders: [],
+                summary:
+                  'Open orders are unavailable in dry-run mode because live account queries are not implemented yet.',
               },
             },
           },
@@ -327,6 +537,7 @@ describe('agent chat service', () => {
       requestAgentChat({
         messages: [{ id: 'assistant-1', role: 'assistant', content: 'hello' }],
         context: {
+          network: 'deepx_devnet',
           pairLabel: 'BTC-USDC',
           priceLabel: '68250.40',
           resolutionLabel: '15m',

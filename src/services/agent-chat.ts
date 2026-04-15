@@ -9,6 +9,7 @@ import {
   type Part,
 } from '@google/genai';
 
+import type { RuntimeNetwork } from '../config/networks';
 import {
   buildChatSystemPrompt,
   buildGenAiContents,
@@ -16,6 +17,7 @@ import {
 } from '../lib/dashboard-chat';
 import {
   DEEPX_AGENT_TOOL_DECLARATIONS,
+  type DeepxAgentToolName,
   executeDeepxAgentTool,
 } from './agent-tools';
 
@@ -24,10 +26,60 @@ export const GENAI_MODEL = 'gemini-3-flash-preview';
 const MAX_TOOL_ROUNDS = 4;
 
 type AgentContext = {
+  network: RuntimeNetwork;
   pairLabel: string;
   priceLabel: string;
   resolutionLabel: string;
   walletUnlocked: boolean;
+};
+
+export type AgentStagedOrder = {
+  network: string;
+  pair: string;
+  side: 'BUY' | 'SELL';
+  type: 'LIMIT' | 'MARKET';
+  size: string;
+  price?: string;
+};
+
+export type AgentChatResult = {
+  reply: string;
+  stagedOrder?: AgentStagedOrder;
+};
+
+export type PendingAgentAction = {
+  id: string;
+  toolName: DeepxAgentToolName;
+  title: string;
+  summaryLines: string[];
+  args: Record<string, unknown>;
+  requiresPassphrase: boolean;
+  confirmLabel: string;
+  cancelLabel: string;
+};
+
+export type AgentContinuation = {
+  defaultNetwork: RuntimeNetwork;
+  systemInstruction: string;
+  contents: Content[];
+  modelToolCallContent: Content;
+  functionCall: Required<Pick<FunctionCall, 'name'>> & FunctionCall;
+  stagedOrders: AgentStagedOrder[];
+  round: number;
+};
+
+export type AgentChatTurnResult =
+  | AgentChatFinalResult
+  | {
+      kind: 'needs_user_action';
+      action: PendingAgentAction;
+      continuation: AgentContinuation;
+    };
+
+export type AgentChatFinalResult = {
+  kind: 'final';
+  reply: string;
+  stagedOrder?: AgentStagedOrder;
 };
 
 type GenAiResponseLike = {
@@ -49,20 +101,117 @@ export async function requestAgentChat(input: {
   context: AgentContext;
   client?: GenAiClientLike;
 }): Promise<string> {
+  const result = await requestAgentChatWithActions(input);
+  if (result.kind === 'needs_user_action') {
+    return result.action.summaryLines.join('\n');
+  }
+
+  return result.reply;
+}
+
+export async function requestAgentChatWithActions(input: {
+  messages: ChatMessage[];
+  context: AgentContext;
+  client?: GenAiClientLike;
+}): Promise<AgentChatTurnResult> {
   if (!input.messages.some((message) => message.role === 'user')) {
     throw new Error('No user prompt available for the DeepX agent.');
   }
 
   const client = input.client ?? createGenAiClient();
   const systemInstruction = buildChatSystemPrompt(input.context);
-  let contents = buildGenAiContents(input.messages) as Content[];
+  const contents = buildGenAiContents(input.messages) as Content[];
 
-  for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
-    const response = await client.models.generateContent({
+  return runAgentToolLoop({
+    client,
+    defaultNetwork: input.context.network,
+    systemInstruction,
+    contents,
+    stagedOrders: [],
+    startingRound: 0,
+  });
+}
+
+export async function continueAgentChatAfterUserAction(input: {
+  continuation: AgentContinuation;
+  actionResult: unknown;
+  client?: GenAiClientLike;
+}): Promise<AgentChatTurnResult> {
+  const client = input.client ?? createGenAiClient();
+  const { continuation } = input;
+  const contents = [
+    ...continuation.contents,
+    continuation.modelToolCallContent,
+    {
+      role: 'user',
+      parts: [
+        {
+          functionResponse: {
+            id: continuation.functionCall.id,
+            name: continuation.functionCall.name,
+            response: {
+              output: input.actionResult,
+            },
+          },
+        },
+      ],
+    },
+  ] satisfies Content[];
+
+  return runAgentToolLoop({
+    client,
+    defaultNetwork: continuation.defaultNetwork,
+    systemInstruction: continuation.systemInstruction,
+    contents,
+    stagedOrders: continuation.stagedOrders,
+    startingRound: continuation.round + 1,
+  });
+}
+
+export async function executeConfirmedAgentAction(input: {
+  action: PendingAgentAction;
+  defaultNetwork: RuntimeNetwork;
+  passphrase?: string;
+}) {
+  return await executeDeepxAgentTool(
+    input.action.toolName,
+    {
+      ...input.action.args,
+      confirm: true,
+      passphrase: input.passphrase,
+    },
+    {
+      allowLiveExecution: true,
+      defaultNetwork: input.defaultNetwork,
+    },
+  );
+}
+
+export function buildCancelledAgentActionResult(action: PendingAgentAction) {
+  return {
+    status: 'cancelled',
+    toolName: action.toolName,
+    summary: 'User cancelled this action in the terminal.',
+  };
+}
+
+async function runAgentToolLoop(input: {
+  client: GenAiClientLike;
+  defaultNetwork: RuntimeNetwork;
+  systemInstruction: string;
+  contents: Content[];
+  stagedOrders: AgentStagedOrder[];
+  startingRound: number;
+}): Promise<AgentChatTurnResult> {
+  let contents = input.contents;
+  const stagedOrders = input.stagedOrders;
+
+  for (let round = input.startingRound; round < MAX_TOOL_ROUNDS; round += 1) {
+    const response = await input.client.models.generateContent({
       model: GENAI_MODEL,
       contents,
       config: {
-        systemInstruction,
+        systemInstruction: input.systemInstruction,
         tools: [
           {
             functionDeclarations: DEEPX_AGENT_TOOL_DECLARATIONS,
@@ -78,12 +227,42 @@ export async function requestAgentChat(input: {
         throw new Error('GenAI SDK returned no text.');
       }
 
-      return text;
+      return {
+        kind: 'final',
+        reply: text,
+        stagedOrder: stagedOrders.at(-1),
+      };
+    }
+
+    const modelToolCallContent = buildModelToolCallContent(
+      response,
+      functionCalls,
+    );
+    const pendingActionCall = functionCalls.find((call) =>
+      shouldRequireUserAction(call.name),
+    );
+    if (pendingActionCall) {
+      return {
+        kind: 'needs_user_action',
+        action: buildPendingAgentAction(
+          pendingActionCall,
+          input.defaultNetwork,
+        ),
+        continuation: {
+          defaultNetwork: input.defaultNetwork,
+          systemInstruction: input.systemInstruction,
+          contents,
+          modelToolCallContent,
+          functionCall: pendingActionCall,
+          stagedOrders,
+          round,
+        },
+      };
     }
 
     contents = [
       ...contents,
-      buildModelToolCallContent(response, functionCalls),
+      modelToolCallContent,
       {
         role: 'user',
         parts: await Promise.all(
@@ -91,7 +270,11 @@ export async function requestAgentChat(input: {
             functionResponse: {
               id: call.id,
               name: call.name,
-              response: await executeToolCall(call),
+              response: await executeToolCall(
+                call,
+                stagedOrders,
+                input.defaultNetwork,
+              ),
             },
           })),
         ),
@@ -171,12 +354,118 @@ function buildFunctionCallPart(call: FunctionCall): Part {
   };
 }
 
-async function executeToolCall(call: FunctionCall) {
+function shouldRequireUserAction(
+  toolName: string,
+): toolName is DeepxAgentToolName {
+  return (
+    toolName === 'deepx_place_order' ||
+    toolName === 'deepx_cancel_order' ||
+    toolName === 'deepx_close_position' ||
+    toolName === 'deepx_update_position' ||
+    toolName === 'deepx_create_subaccount'
+  );
+}
+
+function buildPendingAgentAction(
+  call: Required<Pick<FunctionCall, 'name'>> & FunctionCall,
+  defaultNetwork: RuntimeNetwork,
+): PendingAgentAction {
+  const args = isRecord(call.args) ? call.args : {};
+  const { passphrase: _passphrase, ...safeArgs } = args;
+  const toolName = call.name as DeepxAgentToolName;
+  return {
+    id: call.id ?? `${toolName}-${Date.now()}`,
+    toolName,
+    title: buildPendingActionTitle(toolName),
+    summaryLines: buildPendingActionSummary(toolName, safeArgs, defaultNetwork),
+    args: safeArgs,
+    requiresPassphrase: true,
+    confirmLabel: 'Confirm',
+    cancelLabel: 'Cancel',
+  };
+}
+
+function buildPendingActionTitle(toolName: DeepxAgentToolName) {
+  switch (toolName) {
+    case 'deepx_place_order':
+      return 'Confirm order';
+    case 'deepx_cancel_order':
+      return 'Confirm cancellation';
+    case 'deepx_close_position':
+      return 'Confirm position close';
+    case 'deepx_update_position':
+      return 'Confirm position update';
+    case 'deepx_create_subaccount':
+      return 'Confirm subaccount creation';
+    default:
+      return 'Confirm action';
+  }
+}
+
+function buildPendingActionSummary(
+  toolName: DeepxAgentToolName,
+  args: Record<string, unknown>,
+  defaultNetwork: RuntimeNetwork,
+) {
+  const network = String(args.network ?? defaultNetwork);
+
+  switch (toolName) {
+    case 'deepx_place_order':
+      return [
+        `Action: ${String(args.side ?? 'BUY')} ${String(args.size ?? '')} ${String(args.pair ?? '').trim()}`,
+        `Type: ${String(args.type ?? 'LIMIT')}`,
+        ...(args.price == null || args.price === ''
+          ? []
+          : [`Price: ${String(args.price)}`]),
+        `Network: ${network}`,
+      ];
+    case 'deepx_cancel_order':
+      return [
+        `Action: cancel order ${String(args.orderId ?? '')}`,
+        `Pair: ${String(args.pair ?? '').trim()}`,
+        `Network: ${network}`,
+      ];
+    case 'deepx_close_position':
+      return [
+        `Action: close position on ${String(args.pair ?? '').trim()}`,
+        `Price: ${String(args.price ?? '')}`,
+        `Network: ${network}`,
+      ];
+    case 'deepx_update_position':
+      return [
+        `Action: update position on ${String(args.pair ?? '').trim()}`,
+        `Take profit: ${String(args.takeProfit ?? 'unchanged')}`,
+        `Stop loss: ${String(args.stopLoss ?? 'unchanged')}`,
+        `Network: ${network}`,
+      ];
+    case 'deepx_create_subaccount':
+      return [
+        `Action: create subaccount ${String(args.name ?? '').trim()}`,
+        `Network: ${network}`,
+      ];
+    default:
+      return [`Action: ${toolName}`];
+  }
+}
+
+async function executeToolCall(
+  call: FunctionCall,
+  stagedOrders: AgentStagedOrder[],
+  defaultNetwork: RuntimeNetwork,
+) {
   try {
+    const output = await executeDeepxAgentTool(
+      call.name ?? '',
+      call.args ?? {},
+      {
+        allowLiveExecution: false,
+        defaultNetwork,
+      },
+    );
+    collectStagedOrder(call.name ?? '', output, stagedOrders);
+
     return {
-      output: await executeDeepxAgentTool(call.name ?? '', call.args ?? {}, {
-        allowLiveExecution: call.name === 'deepx_place_order',
-      }),
+      output,
     };
   } catch (error) {
     return {
@@ -188,4 +477,40 @@ async function executeToolCall(call: FunctionCall) {
       },
     };
   }
+}
+
+function collectStagedOrder(
+  toolName: string,
+  output: unknown,
+  stagedOrders: AgentStagedOrder[],
+) {
+  if (toolName !== 'deepx_place_order' || !isRecord(output)) {
+    return;
+  }
+
+  if (output.status !== 'dry_run') {
+    return;
+  }
+
+  const side = output.side === 'SELL' ? 'SELL' : 'BUY';
+  const type = output.type === 'MARKET' ? 'MARKET' : 'LIMIT';
+  const pair = String(output.pair ?? '').trim();
+  const size = String(output.size ?? '').trim();
+  if (!pair || !size) {
+    return;
+  }
+
+  const price =
+    typeof output.price === 'string' && output.price.trim()
+      ? output.price.trim()
+      : undefined;
+
+  stagedOrders.push({
+    network: String(output.network ?? 'deepx_devnet'),
+    pair,
+    side,
+    type,
+    size,
+    price,
+  });
 }

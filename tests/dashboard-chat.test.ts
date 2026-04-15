@@ -14,16 +14,32 @@ import {
 describe('dashboard chat', () => {
   test('builds a system prompt with market context', () => {
     const prompt = buildChatSystemPrompt({
+      network: 'deepx_testnet',
       pairLabel: 'BTC-USDC',
       priceLabel: '68250.40',
       resolutionLabel: '15m',
       walletUnlocked: true,
     });
 
-    expect(prompt).toContain('BTC-USDC');
     expect(prompt).toContain('already unlocked');
     expect(prompt).toContain('status=submitted');
-    expect(prompt).toContain('Do not ask for the passphrase again');
+    expect(prompt).toContain('never set confirm=true from AI chat');
+    expect(prompt).toContain('chooses Confirm in the below-input selector');
+    expect(prompt).toContain(
+      'Do not tell the user to use an Order Entry panel',
+    );
+    expect(prompt).toContain('always include that transaction explorer link');
+    expect(prompt).toContain('compact terminal-friendly block');
+    expect(prompt).toContain('Use uppercase BUY or SELL exactly');
+    expect(prompt).toContain(
+      'Do not switch between perp and spot markets unless the user explicitly names the pair format or explicitly asks for spot or perp.',
+    );
+    expect(prompt).toContain(
+      'If the active pair is SOL-USDC and the user says buy SOL, prepare SOL-USDC, not SOL/USDC.',
+    );
+    expect(prompt).toContain(
+      'The current terminal session network is deepx_testnet; use that network for tool calls unless the user explicitly asks for a different one.',
+    );
   });
 
   test('maps chat history into GenAI contents', () => {
@@ -152,6 +168,11 @@ describe('dashboard chat', () => {
         bold: false,
       },
     ]);
+    expect(
+      getChatLoadingSegments(1)
+        .map((segment) => segment.text)
+        .join(''),
+    ).toBe('Thinking.');
     expect(getChatLoadingSegments(8).slice(3, 9)).toEqual([
       {
         key: 'loading-3-n',

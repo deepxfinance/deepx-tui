@@ -33,14 +33,19 @@ Set `GEMINI_API_KEY` or `GOOGLE_API_KEY` before launch if you want live AI chat 
 - the AI chat panel uses the Google GenAI SDK with `gemini-3-flash-preview`
 - the chat agent can call the built-in DeepX tools directly for market lookup and order workflows
 - the chat agent can read the current local wallet balance, collateral, borrow totals, and perp exposure through a read-only balance tool
+- the chat agent can list all Subaccount contract subaccounts attached to the local wallet
+- the chat agent can prepare a new Subaccount contract creation request; live creation pauses for the below-input confirmation selector
 - the agent tool layer also exposes perp position-close and take-profit/stop-loss update actions
 - while the agent is generating, the chat panel shows an animated `Thinking...` indicator in the transcript and status line
-- simple chat orders like `buy 0.001 ETH` or `sell 2 SOL at 150` are parsed locally against the active pair, then sent as real transactions after you reply `confirm`
-- those locally parsed chat orders reuse the unlocked session wallet and do not ask for the passphrase again
-- AI chat still blocks live execution for agent-driven cancels, position closes, and TP/SL updates until a dedicated confirmation flow exists
-- debug mode shows recent app logs plus HTTP/WebSocket request and response activity
+- trade prompts such as `buy 0.001 ETH` or `sell 2 SOL at 150` go through the AI agent, which can answer in natural language and stage a live action when appropriate
+- when the agent stages an order, you still confirm or cancel it in the selector below the input bar; if the session wallet is already unlocked, submission reuses that passphrase
+- when the AI calls a live-capable order, cancel, position, TP/SL, or subaccount tool, the agent pauses until you choose `Confirm` or `Cancel` below the input bar
+- if no wallet passphrase is remembered for the session, confirming an AI action opens a masked passphrase prompt below the input bar before execution
+- if a live transaction submission fails, the assistant error now includes the RPC URL, request body, tx hash when available, and any RPC error body to speed up debugging
+- debug mode increases logger capture for HTTP/WebSocket request and response activity
+- debug mode also writes captured logs to `~/.local/state/deepx/logs/debug.log`; set `DEEPX_DEBUG_LOG_FILE` if you want a different file
 - the dashboard shows open perp positions for the unlocked wallet in a dedicated lower panel
-- when the debug panel is focused, type to search logs by scope, level, message, or details; `Backspace` edits and `Esc` clears the filter
+- the `/orderbook` workspace now shows the live ladder, latest trades, and compact 1h/24h price and volume stats in the header
 - no MCP server is required for the dashboard chat flow
 - typing `/` in the shell input opens a live command selector and filters matching slash commands as you type
 
@@ -50,11 +55,12 @@ Set `GEMINI_API_KEY` or `GOOGLE_API_KEY` before launch if you want live AI chat 
 - type into the bottom input bar for chat or slash commands
 - typing `/` opens the command selector immediately
 - `/candle`, `/orderbook`, and `/help` are the supported commands
-- `enter` submits input or confirms the selected pair
+- `enter` submits input, confirms the selected pair, activates a confirmation selector action, or submits a masked passphrase prompt
 - `backspace` edits the input bar
-- `esc` skips wallet boot, clears the slash selector, or exits pair selection back to the input bar
+- `esc` skips wallet boot, clears the slash selector, cancels a pending confirmation or passphrase prompt, or exits pair selection back to the input bar
 - `up` and `down` move through the pair picker after `/candle` or `/orderbook`
 - `up` and `down` also move through the slash-command selector while it is open
+- `left` and `right` move through the confirmation selector while a staged local order or AI tool action is pending
 - `[` and `]` change chart resolution while candle view is active
 
 ## Current Shell Surface
@@ -63,5 +69,7 @@ Set `GEMINI_API_KEY` or `GOOGLE_API_KEY` before launch if you want live AI chat 
 - AI transcript above the input bar
 - workspace area for `/candle`, `/orderbook`, and `/help`
 - pair picker after `/candle` and `/orderbook`
+- confirmation selector below the input bar for staged chat orders and AI tool actions
+- masked passphrase prompt below the input bar when a confirmed AI action needs a wallet passphrase
 - command history line above the input bar
 - persistent current network line below the input bar

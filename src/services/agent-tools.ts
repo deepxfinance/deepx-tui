@@ -1,6 +1,9 @@
 import type { FunctionDeclaration } from '@google/genai';
 
-import type { RuntimeNetwork } from '../config/networks';
+import {
+  normalizeRuntimeNetwork,
+  type RuntimeNetwork,
+} from '../config/networks';
 import {
   cancelOrderTool,
   closePositionTool,
@@ -9,12 +12,14 @@ import {
   placeOrderTool,
   updatePositionTool,
 } from './order-tools';
-import { listLivePerpPairs } from './perp-trading';
-import { getUserBalanceTool } from './user-balance';
+import { createSubaccountTool } from './subaccount-tools';
+import { getUserBalanceTool, listUserSubaccountsTool } from './user-balance';
 
 export type DeepxAgentToolName =
   | 'deepx_list_markets'
   | 'deepx_get_user_balance'
+  | 'deepx_list_subaccounts'
+  | 'deepx_create_subaccount'
   | 'deepx_place_order'
   | 'deepx_cancel_order'
   | 'deepx_list_open_orders'
@@ -57,9 +62,45 @@ export const DEEPX_AGENT_TOOL_DECLARATIONS = [
     },
   },
   {
+    name: 'deepx_list_subaccounts',
+    description:
+      'List all Subaccount contract subaccounts for the locally stored wallet on the requested network.',
+    parametersJsonSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        network: {
+          type: 'string',
+          enum: ['deepx_devnet', 'deepx_testnet'],
+          default: 'deepx_devnet',
+        },
+      },
+    },
+  },
+  {
+    name: 'deepx_create_subaccount',
+    description:
+      'Create a new Subaccount contract subaccount for the locally stored wallet. Live creation requires confirm=true and an unlocked wallet session or explicit passphrase.',
+    parametersJsonSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['name'],
+      properties: {
+        network: {
+          type: 'string',
+          enum: ['deepx_devnet', 'deepx_testnet'],
+          default: 'deepx_devnet',
+        },
+        name: { type: 'string' },
+        passphrase: { type: 'string' },
+        confirm: { type: 'boolean', default: false },
+      },
+    },
+  },
+  {
     name: 'deepx_place_order',
     description:
-      'Place a DeepX order. Perp orders become live when confirm=true and the wallet is already unlocked in this session or a passphrase is provided. Passphrase is optional for an unlocked session wallet. All other markets stay dry-run.',
+      'Place a DeepX order. Perp and spot orders become live when confirm=true and the wallet is already unlocked in this session or a passphrase is provided. Passphrase is optional for an unlocked session wallet.',
     parametersJsonSchema: {
       type: 'object',
       additionalProperties: false,
@@ -75,6 +116,7 @@ export const DEEPX_AGENT_TOOL_DECLARATIONS = [
         type: { type: 'string', enum: ['LIMIT', 'MARKET'] },
         size: { anyOf: [{ type: 'string' }, { type: 'number' }] },
         price: { anyOf: [{ type: 'string' }, { type: 'number' }] },
+        slippage: { anyOf: [{ type: 'string' }, { type: 'number' }] },
         tif: { type: 'string', enum: ['GTC', 'IOC', 'FOK'], default: 'GTC' },
         note: { type: 'string' },
         passphrase: { type: 'string' },
@@ -180,38 +222,60 @@ export async function executeDeepxAgentTool(
   args: ToolArguments,
   options: {
     allowLiveExecution?: boolean;
+    defaultNetwork?: RuntimeNetwork;
     getUserBalance?: typeof getUserBalanceTool;
+    listUserSubaccounts?: typeof listUserSubaccountsTool;
+    createSubaccount?: typeof createSubaccountTool;
   } = {},
 ) {
   const allowLiveExecution = options.allowLiveExecution ?? false;
+  const toolNetwork = resolveToolNetwork(args.network, options.defaultNetwork);
   const userBalanceTool = options.getUserBalance ?? getUserBalanceTool;
+  const userSubaccountsTool =
+    options.listUserSubaccounts ?? listUserSubaccountsTool;
+  const createSubaccount = options.createSubaccount ?? createSubaccountTool;
 
   switch (name) {
     case 'deepx_list_markets':
       return {
-        network: normalizeNetwork(args.network),
-        markets: listSupportedMarkets(normalizeNetwork(args.network)),
+        network: toolNetwork,
+        markets: await listSupportedMarkets(toolNetwork),
       };
     case 'deepx_get_user_balance':
       return await userBalanceTool({
-        network: normalizeNetwork(args.network),
+        network: toolNetwork,
       });
-    case 'deepx_place_order':
+    case 'deepx_list_subaccounts':
+      return await userSubaccountsTool({
+        network: toolNetwork,
+      });
+    case 'deepx_create_subaccount':
       if (!allowLiveExecution && hasLiveExecutionRequest(args)) {
         return buildLiveExecutionBlockedResult({
-          action: 'place_order',
-          network: normalizeNetwork(args.network),
-          pair: String(args.pair ?? ''),
+          action: 'create_subaccount',
+          network: toolNetwork,
         });
       }
 
+      return await createSubaccount({
+        network: toolNetwork,
+        name: String(args.name ?? ''),
+        passphrase: allowLiveExecution
+          ? (args.passphrase as string | undefined)
+          : undefined,
+        confirm: allowLiveExecution
+          ? (args.confirm as boolean | undefined)
+          : false,
+      });
+    case 'deepx_place_order':
       return await placeOrderTool({
-        network: normalizeNetwork(args.network),
+        network: toolNetwork,
         pair: String(args.pair ?? ''),
         side: String(args.side ?? 'BUY') as 'BUY' | 'SELL',
         type: String(args.type ?? 'LIMIT') as 'LIMIT' | 'MARKET',
         size: args.size as string | number,
         price: args.price as string | number | undefined,
+        slippage: args.slippage as string | number | undefined,
         tif: args.tif as 'GTC' | 'IOC' | 'FOK' | undefined,
         note: args.note as string | undefined,
         passphrase: allowLiveExecution
@@ -229,14 +293,14 @@ export async function executeDeepxAgentTool(
       ) {
         return buildLiveExecutionBlockedResult({
           action: 'cancel_order',
-          network: normalizeNetwork(args.network),
+          network: toolNetwork,
           pair: String(args.pair ?? ''),
           orderId: Number(args.orderId ?? 0),
         });
       }
 
       return await cancelOrderTool({
-        network: normalizeNetwork(args.network),
+        network: toolNetwork,
         pair: String(args.pair ?? ''),
         orderId: Number(args.orderId ?? 0),
         passphrase: allowLiveExecution
@@ -247,7 +311,7 @@ export async function executeDeepxAgentTool(
           : false,
       });
     case 'deepx_list_open_orders':
-      return listOpenOrdersDryRun(normalizeNetwork(args.network));
+      return listOpenOrdersDryRun(toolNetwork);
     case 'deepx_close_position':
       if (
         !allowLiveExecution &&
@@ -256,13 +320,13 @@ export async function executeDeepxAgentTool(
       ) {
         return buildLiveExecutionBlockedResult({
           action: 'close_position',
-          network: normalizeNetwork(args.network),
+          network: toolNetwork,
           pair: String(args.pair ?? ''),
         });
       }
 
       return await closePositionTool({
-        network: normalizeNetwork(args.network),
+        network: toolNetwork,
         pair: String(args.pair ?? ''),
         price: args.price as string | number,
         slippage: args.slippage as string | number | undefined,
@@ -281,13 +345,13 @@ export async function executeDeepxAgentTool(
       ) {
         return buildLiveExecutionBlockedResult({
           action: 'update_position',
-          network: normalizeNetwork(args.network),
+          network: toolNetwork,
           pair: String(args.pair ?? ''),
         });
       }
 
       return await updatePositionTool({
-        network: normalizeNetwork(args.network),
+        network: toolNetwork,
         pair: String(args.pair ?? ''),
         takeProfit: args.takeProfit as string | number | undefined,
         stopLoss: args.stopLoss as string | number | undefined,
@@ -303,8 +367,15 @@ export async function executeDeepxAgentTool(
   }
 }
 
-function normalizeNetwork(value: unknown): RuntimeNetwork {
-  return value === 'deepx_testnet' ? 'deepx_testnet' : 'deepx_devnet';
+function resolveToolNetwork(
+  value: unknown,
+  defaultNetwork?: RuntimeNetwork,
+): RuntimeNetwork {
+  if (typeof value === 'string' && value.trim().length > 0) {
+    return normalizeRuntimeNetwork(value);
+  }
+
+  return defaultNetwork ?? 'deepx_devnet';
 }
 
 function hasLiveExecutionRequest(args: ToolArguments) {
@@ -315,19 +386,24 @@ function hasLiveExecutionRequest(args: ToolArguments) {
 }
 
 function isLivePerpPair(pair: string) {
-  return listLivePerpPairs().some((livePair) => livePair === pair);
+  return pair.includes('-') && !pair.includes('/');
 }
 
 function buildLiveExecutionBlockedResult(input: {
-  action: 'place_order' | 'cancel_order' | 'close_position' | 'update_position';
+  action:
+    | 'place_order'
+    | 'cancel_order'
+    | 'close_position'
+    | 'update_position'
+    | 'create_subaccount';
   network: RuntimeNetwork;
-  pair: string;
+  pair?: string;
   orderId?: number;
 }) {
   const orderLabel =
     input.action === 'cancel_order' && input.orderId
       ? `order ${input.orderId} on ${input.pair}`
-      : input.pair;
+      : input.pair || 'the local wallet';
 
   return {
     status: 'blocked',
@@ -335,15 +411,17 @@ function buildLiveExecutionBlockedResult(input: {
     pair: input.pair,
     orderId: input.orderId,
     summary: `Live ${describeBlockedAction(input.action)} is disabled in AI chat for ${orderLabel}.`,
-    warnings: [
-      'AI chat is advisory-only for trading actions.',
-      'Use an explicit order-entry workflow for any live submission or cancellation.',
-    ],
+    warnings: buildBlockedActionWarnings(input.action),
   };
 }
 
 function describeBlockedAction(
-  action: 'place_order' | 'cancel_order' | 'close_position' | 'update_position',
+  action:
+    | 'place_order'
+    | 'cancel_order'
+    | 'close_position'
+    | 'update_position'
+    | 'create_subaccount',
 ) {
   switch (action) {
     case 'place_order':
@@ -354,5 +432,28 @@ function describeBlockedAction(
       return 'position close';
     case 'update_position':
       return 'position update';
+    case 'create_subaccount':
+      return 'subaccount creation';
   }
+}
+
+function buildBlockedActionWarnings(
+  action:
+    | 'place_order'
+    | 'cancel_order'
+    | 'close_position'
+    | 'update_position'
+    | 'create_subaccount',
+) {
+  if (action === 'create_subaccount') {
+    return [
+      'AI chat is advisory-only for live account-management actions.',
+      'Use an explicit account workflow for any live subaccount creation.',
+    ];
+  }
+
+  return [
+    'AI chat is advisory-only for trading actions.',
+    'Use an explicit order-entry workflow for any live submission or cancellation.',
+  ];
 }

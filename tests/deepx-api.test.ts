@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
 import { getNetworkConfig } from '../src/config/networks';
 import {
@@ -6,11 +6,26 @@ import {
   DEFAULT_CANDLE_HISTORY_LIMIT,
   resolutionToTimeFrame,
 } from '../src/services/deepx-api';
-import { getMarketPairs, getPairsByKind } from '../src/services/market-catalog';
+import {
+  getNetworkMarkets,
+  getPairsByKind,
+} from '../src/services/market-catalog';
+import { installMockMarketApi } from './market-api-fixture';
+
+let restoreFetch: (() => void) | undefined;
+
+beforeEach(() => {
+  restoreFetch = installMockMarketApi();
+});
+
+afterEach(() => {
+  restoreFetch?.();
+  restoreFetch = undefined;
+});
 
 describe('market-catalog', () => {
-  test('exposes perp and spot pairs', () => {
-    const pairs = getMarketPairs(getNetworkConfig('devnet'));
+  test('exposes perp and spot pairs', async () => {
+    const pairs = await getNetworkMarkets(getNetworkConfig('devnet'));
     expect(getPairsByKind(pairs, 'perp').map((pair) => pair.label)).toEqual([
       'ETH-USDC',
       'SOL-USDC',

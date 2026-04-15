@@ -1,13 +1,291 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
 import {
   fetchUserBalance,
   getUserBalanceTool,
+  listUserSubaccountsTool,
+  SUBACCOUNT_ABI,
 } from '../src/services/user-balance';
+import { installMockMarketApi } from './market-api-fixture';
+
+let restoreFetch: (() => void) | undefined;
+
+beforeEach(() => {
+  restoreFetch = installMockMarketApi();
+});
+
+afterEach(() => {
+  restoreFetch?.();
+  restoreFetch = undefined;
+});
 
 describe('user balance tool', () => {
+  const walletRecord = {
+    version: 1 as const,
+    network: 'deepx_devnet' as const,
+    address: '0x1111000000000000000000000000000000001111',
+    createdAt: '2026-04-15T00:00:00.000Z',
+    crypto: {
+      algorithm: 'aes-256-gcm' as const,
+      kdf: 'scrypt' as const,
+      saltHex: '',
+      ivHex: '',
+      authTagHex: '',
+      ciphertextHex: '',
+    },
+  };
+
+  test('uses the current Subaccount contract ABI shape', () => {
+    const functionNames = SUBACCOUNT_ABI.map((item) => item.name);
+
+    expect(functionNames).toEqual([
+      'createOneClickTradingAccount',
+      'delegateAccounts',
+      'deleteOneClickTradingAccount',
+      'deleteSubaccount',
+      'disableOnClickTradingAccount',
+      'enableOnClickTradingAccount',
+      'initializeSubaccount',
+      'oneClickTradingAccountsFor',
+      'renameSubaccount',
+      'setDelegateAccount',
+      'setSpotMargin',
+      'subaccountInfo',
+      'userStats',
+    ]);
+
+    const subaccountInfo = SUBACCOUNT_ABI.find(
+      (item) => item.name === 'subaccountInfo',
+    );
+    const userTuple = subaccountInfo?.outputs[0]?.components;
+
+    expect(userTuple?.map((component) => component.name)).toEqual([
+      'authority',
+      'delegate',
+      'name',
+      'spot_positions',
+      'borrow_positions',
+      'next_order_id',
+      'status',
+      'is_margin_trading_enabled',
+    ]);
+    expect(subaccountInfo?.outputs[0]?.internalType).toBe(
+      'struct Subaccount.User',
+    );
+  });
+
   test('returns unavailable when no local wallet exists', async () => {
     const result = await getUserBalanceTool(
+      { network: 'deepx_devnet' },
+      {
+        async readWalletRecord() {
+          return null;
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      status: 'unavailable',
+      network: 'deepx_devnet',
+      summary:
+        'No local wallet found for deepx_devnet. Import or unlock a wallet first.',
+    });
+  });
+
+  test('fetches balances for the first contract subaccount', async () => {
+    const calls: string[] = [];
+    const result = await getUserBalanceTool(
+      { network: 'deepx_devnet' },
+      {
+        async readWalletRecord() {
+          return walletRecord;
+        },
+        createContracts() {
+          return {
+            async userStats(user) {
+              calls.push(`userStats:${user}`);
+              return {
+                subaccounts: [
+                  {
+                    subaccount: '0x2222000000000000000000000000000000002222',
+                    name: '0x6d61696e',
+                  },
+                ],
+                if_staked_quote_asset_amount: 0n,
+                number_of_sub_accounts: 1,
+                number_of_sub_accounts_created: 1,
+              };
+            },
+            async subaccountInfo(account) {
+              calls.push(`subaccountInfo:${account}`);
+              return {
+                spot_positions: [],
+                borrow_positions: [],
+              };
+            },
+            async getOraclePriceAll() {
+              return [];
+            },
+            async totalCollateralAndMarginRequiredFor(account) {
+              calls.push(`margin:${account}`);
+              return {
+                collateral: 0n,
+                margin_required: 0n,
+              };
+            },
+            async userPerpPositions(account) {
+              calls.push(`positions:${account}`);
+              return [];
+            },
+            async assetPools() {
+              return [];
+            },
+          };
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: 'success',
+      walletAddress: '0x1111000000000000000000000000000000001111',
+      subaccountAddress: '0x2222000000000000000000000000000000002222',
+    });
+    expect(calls).toContain(
+      'userStats:0x1111000000000000000000000000000000001111',
+    );
+    expect(calls).toContain(
+      'subaccountInfo:0x2222000000000000000000000000000000002222',
+    );
+    expect(calls).not.toContain(
+      'subaccountInfo:0x1111000000000000000000000000000000001111',
+    );
+  });
+
+  test('returns unavailable when the wallet has no contract subaccounts', async () => {
+    const result = await getUserBalanceTool(
+      { network: 'deepx_devnet' },
+      {
+        async readWalletRecord() {
+          return walletRecord;
+        },
+        createContracts() {
+          return {
+            async userStats() {
+              return {
+                subaccounts: [],
+                if_staked_quote_asset_amount: 0n,
+                number_of_sub_accounts: 0,
+                number_of_sub_accounts_created: 0,
+              };
+            },
+            async subaccountInfo() {
+              throw new Error('subaccountInfo should not be called');
+            },
+            async getOraclePriceAll() {
+              return [];
+            },
+            async totalCollateralAndMarginRequiredFor() {
+              return {
+                collateral: 0n,
+                margin_required: 0n,
+              };
+            },
+            async userPerpPositions() {
+              return [];
+            },
+            async assetPools() {
+              return [];
+            },
+          };
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      status: 'unavailable',
+      network: 'deepx_devnet',
+      summary:
+        'No subaccount found for 0x1111000000000000000000000000000000001111 on deepx_devnet. Create or initialize a subaccount first.',
+    });
+  });
+
+  test('lists all contract subaccounts for the local wallet', async () => {
+    const result = await listUserSubaccountsTool(
+      { network: 'deepx_devnet' },
+      {
+        async readWalletRecord() {
+          return walletRecord;
+        },
+        createContracts() {
+          return {
+            async userStats(user) {
+              expect(user).toBe(walletRecord.address);
+              return {
+                subaccounts: [
+                  {
+                    subaccount: '0x2222000000000000000000000000000000002222',
+                    name: '0x6d61696e',
+                  },
+                  {
+                    subaccount: '0x3333000000000000000000000000000000003333',
+                    name: '0x',
+                  },
+                ],
+                if_staked_quote_asset_amount: 12n,
+                number_of_sub_accounts: 2,
+                number_of_sub_accounts_created: 5,
+              };
+            },
+            async subaccountInfo() {
+              throw new Error('subaccountInfo should not be called');
+            },
+            async getOraclePriceAll() {
+              return [];
+            },
+            async totalCollateralAndMarginRequiredFor() {
+              return {
+                collateral: 0n,
+                margin_required: 0n,
+              };
+            },
+            async userPerpPositions() {
+              return [];
+            },
+            async assetPools() {
+              return [];
+            },
+          };
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      status: 'success',
+      network: 'deepx_devnet',
+      walletAddress: walletRecord.address,
+      subaccounts: [
+        {
+          address: '0x2222000000000000000000000000000000002222',
+          name: 'main',
+        },
+        {
+          address: '0x3333000000000000000000000000000000003333',
+          name: 'Subaccount 2',
+        },
+      ],
+      numberOfSubaccounts: 2,
+      numberOfSubaccountsCreated: 5,
+      ifStakedQuoteAssetAmount: '12',
+      summary:
+        'Found 2 active subaccount(s) for 0x1111000000000000000000000000000000001111 on deepx_devnet.\n' +
+        'Total created: 5.\n' +
+        '1. main: 0x2222000000000000000000000000000000002222\n' +
+        '2. Subaccount 2: 0x3333000000000000000000000000000000003333',
+    });
+  });
+
+  test('returns unavailable for subaccount listing when no local wallet exists', async () => {
+    const result = await listUserSubaccountsTool(
       { network: 'deepx_devnet' },
       {
         async readWalletRecord() {
@@ -30,6 +308,19 @@ describe('user balance tool', () => {
       walletAddress: '0x1234000000000000000000000000000000005678',
       subaccountAddress: '0x1234000000000000000000000000000000005678',
       contracts: {
+        async userStats() {
+          return {
+            subaccounts: [
+              {
+                subaccount: '0x1234000000000000000000000000000000005678',
+                name: '0x6d61696e',
+              },
+            ],
+            if_staked_quote_asset_amount: 0n,
+            number_of_sub_accounts: 1,
+            number_of_sub_accounts_created: 1,
+          };
+        },
         async subaccountInfo() {
           return {
             spot_positions: [

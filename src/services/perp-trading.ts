@@ -1,7 +1,18 @@
-import { Contract, JsonRpcProvider, parseUnits, Wallet } from 'ethers';
+import { Contract, parseUnits, Wallet } from 'ethers';
 
 import { getNetworkConfig, type RuntimeNetwork } from '../config/networks';
-import { logNetworkRequest, logNetworkResponse } from './logger';
+import { getNetworkMarkets } from './market-catalog';
+import { resolvePrimarySubaccountAddress } from './subaccount-contract';
+import {
+  createRpcProvider,
+  submitRpcTransaction,
+} from './transaction-submission';
+
+export {
+  formatRpcFailureMessage,
+  getTransactionSubmissionRpcUrl,
+} from './transaction-submission';
+
 import { decryptPrivateKey, readWalletRecord } from './wallet-store';
 
 const PERP_CONTRACT_ADDRESS = '0x000000000000000000000000000000000000044E';
@@ -56,29 +67,6 @@ type UpdatePerpPositionInput = {
   confirm: boolean;
 };
 
-const perpMarkets = {
-  'ETH-USDC': {
-    marketId: 3,
-    baseDecimals: 18,
-    priceDecimals: 6,
-    orderDecimals: 3,
-  },
-  'SOL-USDC': {
-    marketId: 4,
-    baseDecimals: 9,
-    priceDecimals: 6,
-    orderDecimals: 2,
-  },
-} as const satisfies Record<
-  PerpPair,
-  {
-    marketId: number;
-    baseDecimals: number;
-    priceDecimals: number;
-    orderDecimals: number;
-  }
->;
-
 export async function placePerpOrderLive(input: PlacePerpOrderInput): Promise<{
   status: 'submitted';
   network: RuntimeNetwork;
@@ -100,9 +88,13 @@ export async function placePerpOrderLive(input: PlacePerpOrderInput): Promise<{
   }
 
   const privateKey = decryptPrivateKey(walletRecord.crypto, input.passphrase);
-  const provider = new JsonRpcProvider(network.rpcUrl);
+  const provider = createRpcProvider(network);
   const signer = new Wallet(privateKey, provider);
-  const market = perpMarkets[input.pair];
+  const subaccountAddress = await resolvePrimarySubaccountAddress({
+    walletAddress: walletRecord.address,
+    provider,
+  });
+  const market = await findLivePerpMarket(networkId, input.pair);
   const contract = new Contract(PERP_CONTRACT_ADDRESS, PERP_ABI, signer);
 
   const size = parsePositiveDecimal(input.size, market.baseDecimals, 'size');
@@ -117,12 +109,13 @@ export async function placePerpOrderLive(input: PlacePerpOrderInput): Promise<{
     ? parsePositiveDecimal(input.stopLoss, market.priceDecimals, 'stopLoss')
     : 0n;
   const leverage = normalizeLeverage(input.leverage);
-  const nonce = await signer.getNonce('pending');
+  // biome-ignore lint/complexity/useDateNow: DeepX transaction nonces use Date valueOf for backend compatibility.
+  const nonce = new Date().valueOf();
 
   const txRequest = await contract
     .getFunction('placePerpOrder')
     .populateTransaction(
-      walletRecord.address,
+      subaccountAddress,
       market.marketId,
       input.side === 'BUY',
       size,
@@ -142,7 +135,7 @@ export async function placePerpOrderLive(input: PlacePerpOrderInput): Promise<{
     gasLimit: 1000000n,
   });
 
-  const txHash = await submitRpcTransaction({
+  const { txHash } = await submitRpcTransaction({
     network,
     provider,
     signedTx,
@@ -154,8 +147,41 @@ export async function placePerpOrderLive(input: PlacePerpOrderInput): Promise<{
     pair: input.pair,
     txHash,
     explorerUrl: `${network.explorerUrl}/tx/${txHash}`,
-    summary: `${network.shortLabel} ${input.side} ${input.size} ${input.pair} ${input.type}`,
+    summary: buildSubmittedOrderSummary({
+      networkLabel: network.shortLabel,
+      pair: input.pair,
+      side: input.side,
+      type: input.type,
+      size: String(input.size),
+      price: input.price == null ? undefined : String(input.price),
+      txHash,
+      explorerUrl: `${network.explorerUrl}/tx/${txHash}`,
+    }),
   };
+}
+
+export function buildSubmittedOrderSummary(input: {
+  networkLabel: string;
+  pair: PerpPair;
+  side: 'BUY' | 'SELL';
+  type: 'LIMIT' | 'MARKET';
+  size: string;
+  price?: string;
+  txHash: string;
+  explorerUrl: string;
+}) {
+  return [
+    'Order submitted',
+    `Side: ${input.side}`,
+    `Pair: ${input.pair}`,
+    `Type: ${input.type}`,
+    `Size: ${input.size}`,
+    ...(input.price ? [`Price: ${input.price}`] : []),
+    `Network: ${input.networkLabel}`,
+    `Tx Hash: ${truncateTxHash(input.txHash)}`,
+    'Explorer:',
+    input.explorerUrl,
+  ].join('\n');
 }
 
 export async function cancelPerpOrderLive(
@@ -180,15 +206,20 @@ export async function cancelPerpOrderLive(
   }
 
   const privateKey = decryptPrivateKey(walletRecord.crypto, input.passphrase);
-  const provider = new JsonRpcProvider(network.rpcUrl);
+  const provider = createRpcProvider(network);
   const signer = new Wallet(privateKey, provider);
-  const market = perpMarkets[input.pair];
+  const subaccountAddress = await resolvePrimarySubaccountAddress({
+    walletAddress: walletRecord.address,
+    provider,
+  });
+  const market = await findLivePerpMarket(networkId, input.pair);
   const contract = new Contract(PERP_CONTRACT_ADDRESS, PERP_ABI, signer);
-  const nonce = await signer.getNonce('pending');
+  // biome-ignore lint/complexity/useDateNow: DeepX transaction nonces use Date valueOf for backend compatibility.
+  const nonce = new Date().valueOf();
 
   const txRequest = await contract
     .getFunction('cancelOrder')
-    .populateTransaction(walletRecord.address, market.marketId, input.orderId);
+    .populateTransaction(subaccountAddress, market.marketId, input.orderId);
 
   const signedTx = await signer.signTransaction({
     ...txRequest,
@@ -197,7 +228,7 @@ export async function cancelPerpOrderLive(
     gasLimit: 1000000n,
   });
 
-  const txHash = await submitRpcTransaction({
+  const { txHash } = await submitRpcTransaction({
     network,
     provider,
     signedTx,
@@ -235,16 +266,21 @@ export async function closePerpPositionLive(
   }
 
   const privateKey = decryptPrivateKey(walletRecord.crypto, input.passphrase);
-  const provider = new JsonRpcProvider(network.rpcUrl);
+  const provider = createRpcProvider(network);
   const signer = new Wallet(privateKey, provider);
-  const market = perpMarkets[input.pair];
+  const subaccountAddress = await resolvePrimarySubaccountAddress({
+    walletAddress: walletRecord.address,
+    provider,
+  });
+  const market = await findLivePerpMarket(networkId, input.pair);
   const contract = new Contract(PERP_CONTRACT_ADDRESS, PERP_ABI, signer);
-  const nonce = await signer.getNonce('pending');
+  // biome-ignore lint/complexity/useDateNow: DeepX transaction nonces use Date valueOf for backend compatibility.
+  const nonce = new Date().valueOf();
 
   const txRequest = await contract
     .getFunction('closePosition')
     .populateTransaction(
-      walletRecord.address,
+      subaccountAddress,
       market.marketId,
       parsePositiveDecimal(input.price, market.priceDecimals, 'price'),
       normalizeSlippage(input.slippage),
@@ -257,7 +293,7 @@ export async function closePerpPositionLive(
     gasLimit: 1000000n,
   });
 
-  const txHash = await submitRpcTransaction({
+  const { txHash } = await submitRpcTransaction({
     network,
     provider,
     signedTx,
@@ -295,16 +331,21 @@ export async function updatePerpPositionLive(
   }
 
   const privateKey = decryptPrivateKey(walletRecord.crypto, input.passphrase);
-  const provider = new JsonRpcProvider(network.rpcUrl);
+  const provider = createRpcProvider(network);
   const signer = new Wallet(privateKey, provider);
-  const market = perpMarkets[input.pair];
+  const subaccountAddress = await resolvePrimarySubaccountAddress({
+    walletAddress: walletRecord.address,
+    provider,
+  });
+  const market = await findLivePerpMarket(networkId, input.pair);
   const contract = new Contract(PERP_CONTRACT_ADDRESS, PERP_ABI, signer);
-  const nonce = await signer.getNonce('pending');
+  // biome-ignore lint/complexity/useDateNow: DeepX transaction nonces use Date valueOf for backend compatibility.
+  const nonce = new Date().valueOf();
 
   const txRequest = await contract
     .getFunction('setProfitAndLossPoint')
     .populateTransaction(
-      walletRecord.address,
+      subaccountAddress,
       market.marketId,
       parseNonNegativeDecimal(
         input.takeProfit,
@@ -321,7 +362,7 @@ export async function updatePerpPositionLive(
     gasLimit: 1000000n,
   });
 
-  const txHash = await submitRpcTransaction({
+  const { txHash } = await submitRpcTransaction({
     network,
     provider,
     signedTx,
@@ -337,8 +378,33 @@ export async function updatePerpPositionLive(
   };
 }
 
-export function listLivePerpPairs(): PerpPair[] {
-  return Object.keys(perpMarkets) as PerpPair[];
+export async function listLivePerpPairs(
+  network: RuntimeNetwork = 'deepx_devnet',
+): Promise<PerpPair[]> {
+  return (await getNetworkMarkets(getNetworkConfig(network)))
+    .filter((pair) => pair.kind === 'perp')
+    .map((pair) => pair.label as PerpPair);
+}
+
+async function findLivePerpMarket(
+  network: RuntimeNetwork,
+  pairLabel: PerpPair,
+) {
+  const pair = (await getNetworkMarkets(getNetworkConfig(network))).find(
+    (candidate) => candidate.kind === 'perp' && candidate.label === pairLabel,
+  );
+  if (!pair || pair.marketId == null) {
+    throw new Error(
+      `Unsupported live perp pair "${pairLabel}" for ${network}.`,
+    );
+  }
+
+  return {
+    marketId: pair.marketId,
+    baseDecimals: pair.baseDecimals,
+    priceDecimals: pair.quoteDecimals ?? 6,
+    orderDecimals: pair.orderDecimal,
+  };
 }
 
 function normalizeLeverage(value?: number): number {
@@ -401,58 +467,10 @@ function parseNonNegativeDecimal(
   return parseUnits(normalized, decimals);
 }
 
-async function submitRpcTransaction(input: {
-  network: ReturnType<typeof getNetworkConfig>;
-  provider: JsonRpcProvider;
-  signedTx: string;
-}) {
-  logNetworkRequest({
-    scope: 'rpc',
-    method: 'POST',
-    url: input.network.rpcUrl,
-    body: JSON.stringify({
-      method: 'eth_sendRawTransaction',
-      signedTx: input.signedTx,
-    }),
-  });
-  try {
-    const response = await input.provider.broadcastTransaction(input.signedTx);
-    logNetworkResponse({
-      scope: 'rpc',
-      method: 'POST',
-      url: input.network.rpcUrl,
-      status: 200,
-      body: JSON.stringify({
-        txHash: response.hash,
-      }),
-    });
-    return response.hash;
-  } catch (error) {
-    const message = formatRpcFailureMessage(error);
-    logNetworkResponse({
-      scope: 'rpc',
-      method: 'POST',
-      url: input.network.rpcUrl,
-      status: 500,
-      body: message,
-    });
-    throw new Error(message, { cause: error });
-  }
-}
-
-export function getTransactionSubmissionRpcUrl(
-  network: ReturnType<typeof getNetworkConfig>,
-) {
-  return network.rpcUrl;
-}
-
-export function formatRpcFailureMessage(error: unknown) {
-  if (error instanceof Error) {
-    const message = error.message.trim();
-    if (message) {
-      return `RPC transaction submission failed: ${message}`;
-    }
+function truncateTxHash(txHash: string) {
+  if (txHash.length <= 13) {
+    return txHash;
   }
 
-  return 'RPC transaction submission failed.';
+  return `${txHash.slice(0, 8)}...${txHash.slice(-4)}`;
 }
