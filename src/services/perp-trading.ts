@@ -122,7 +122,8 @@ export async function placePerpOrderLive(input: PlacePerpOrderInput): Promise<{
     ? parsePositiveDecimal(input.stopLoss, market.priceDecimals, 'stopLoss')
     : 0n;
   const leverage = normalizeLeverage(input.leverage);
-  const nonce = await signer.getNonce('pending');
+  // biome-ignore lint/complexity/useDateNow: DeepX transaction nonces use Date valueOf for backend compatibility.
+  const nonce = new Date().valueOf();
 
   const txRequest = await contract
     .getFunction('placePerpOrder')
@@ -226,7 +227,8 @@ export async function cancelPerpOrderLive(
   });
   const market = perpMarkets[input.pair];
   const contract = new Contract(PERP_CONTRACT_ADDRESS, PERP_ABI, signer);
-  const nonce = await signer.getNonce('pending');
+  // biome-ignore lint/complexity/useDateNow: DeepX transaction nonces use Date valueOf for backend compatibility.
+  const nonce = new Date().valueOf();
 
   const txRequest = await contract
     .getFunction('cancelOrder')
@@ -285,7 +287,8 @@ export async function closePerpPositionLive(
   });
   const market = perpMarkets[input.pair];
   const contract = new Contract(PERP_CONTRACT_ADDRESS, PERP_ABI, signer);
-  const nonce = await signer.getNonce('pending');
+  // biome-ignore lint/complexity/useDateNow: DeepX transaction nonces use Date valueOf for backend compatibility.
+  const nonce = new Date().valueOf();
 
   const txRequest = await contract
     .getFunction('closePosition')
@@ -349,7 +352,8 @@ export async function updatePerpPositionLive(
   });
   const market = perpMarkets[input.pair];
   const contract = new Contract(PERP_CONTRACT_ADDRESS, PERP_ABI, signer);
-  const nonce = await signer.getNonce('pending');
+  // biome-ignore lint/complexity/useDateNow: DeepX transaction nonces use Date valueOf for backend compatibility.
+  const nonce = new Date().valueOf();
 
   const txRequest = await contract
     .getFunction('setProfitAndLossPoint')

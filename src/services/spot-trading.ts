@@ -81,7 +81,8 @@ export async function placeSpotOrderLive(input: PlaceSpotOrderInput): Promise<{
     pairId: order.args[0],
     pairLabel: input.pair,
   });
-  const nonce = await signer.getNonce('pending');
+  // biome-ignore lint/complexity/useDateNow: DeepX transaction nonces use Date valueOf for backend compatibility.
+  const nonce = new Date().valueOf();
   const txRequest = await contract
     .getFunction(order.functionName)
     .populateTransaction(subaccountAddress, ...order.args);
