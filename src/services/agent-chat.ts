@@ -29,7 +29,6 @@ type AgentContext = {
   network: RuntimeNetwork;
   pairLabel: string;
   priceLabel: string;
-  resolutionLabel: string;
   walletUnlocked: boolean;
 };
 

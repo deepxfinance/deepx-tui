@@ -10,7 +10,6 @@ type ChatPromptContext = {
   network: RuntimeNetwork;
   pairLabel: string;
   priceLabel: string;
-  resolutionLabel: string;
   walletUnlocked: boolean;
 };
 
@@ -116,7 +115,6 @@ export function buildChatSystemPrompt(context: ChatPromptContext): string {
     'Use uppercase BUY or SELL exactly for the side field so the terminal can style it distinctly.',
     'Keep submitted-order responses crisp, structured, and visually clean for a narrow terminal.',
     'If those execution requirements are missing, explain the constraint instead of implying execution happened.',
-    `Chart resolution: ${context.resolutionLabel}.`,
     'Prefer actionable market commentary, risk framing, and keyboard guidance relevant to this terminal.',
   ].join(' ');
 }

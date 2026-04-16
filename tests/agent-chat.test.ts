@@ -30,7 +30,6 @@ describe('agent chat service', () => {
         network: 'deepx_devnet',
         pairLabel: 'BTC-USDC',
         priceLabel: '68250.40',
-        resolutionLabel: '15m',
         walletUnlocked: true,
       },
       client,
@@ -40,9 +39,6 @@ describe('agent chat service', () => {
     expect(calls).toHaveLength(1);
     const firstCall = calls[0];
     expect(firstCall).toBeDefined();
-    expect(firstCall?.config?.systemInstruction).toContain(
-      'Chart resolution: 15m.',
-    );
   });
 
   test('executes local tools and sends tool responses back to the model', async () => {
@@ -79,7 +75,6 @@ describe('agent chat service', () => {
         network: 'deepx_devnet',
         pairLabel: 'BTC-USDC',
         priceLabel: '68250.40',
-        resolutionLabel: '15m',
         walletUnlocked: true,
       },
       client,
@@ -172,7 +167,6 @@ describe('agent chat service', () => {
         network: 'deepx_devnet',
         pairLabel: 'BTC-USDC',
         priceLabel: '68250.40',
-        resolutionLabel: '15m',
         walletUnlocked: true,
       },
       client,
@@ -231,7 +225,6 @@ describe('agent chat service', () => {
         network: 'deepx_devnet',
         pairLabel: 'BTC-USDC',
         priceLabel: '68250.40',
-        resolutionLabel: '15m',
         walletUnlocked: true,
       },
       client,
@@ -297,7 +290,6 @@ describe('agent chat service', () => {
         network: 'deepx_devnet',
         pairLabel: 'ETH-USDC',
         priceLabel: '1000.00',
-        resolutionLabel: '15m',
         walletUnlocked: true,
       },
       client,
@@ -366,7 +358,6 @@ describe('agent chat service', () => {
         network: 'deepx_devnet',
         pairLabel: 'ETH-USDC',
         priceLabel: '1000.00',
-        resolutionLabel: '15m',
         walletUnlocked: true,
       },
       client,
@@ -423,7 +414,6 @@ describe('agent chat service', () => {
         network: 'deepx_testnet',
         pairLabel: 'ETH-USDC',
         priceLabel: '1000.00',
-        resolutionLabel: '15m',
         walletUnlocked: true,
       },
       client,
@@ -495,7 +485,6 @@ describe('agent chat service', () => {
         network: 'deepx_devnet',
         pairLabel: 'ETH-USDC',
         priceLabel: '1000.00',
-        resolutionLabel: '15m',
         walletUnlocked: true,
       },
       client,
@@ -574,7 +563,6 @@ describe('agent chat service', () => {
         network: 'deepx_testnet',
         pairLabel: 'BTC-USDC',
         priceLabel: '68250.40',
-        resolutionLabel: '15m',
         walletUnlocked: true,
       },
       client,
@@ -628,7 +616,6 @@ describe('agent chat service', () => {
         network: 'deepx_devnet',
         pairLabel: 'BTC-USDC',
         priceLabel: '68250.40',
-        resolutionLabel: '15m',
         walletUnlocked: true,
       },
       client,
@@ -692,7 +679,6 @@ describe('agent chat service', () => {
         network: 'deepx_devnet',
         pairLabel: 'ETH-USDC',
         priceLabel: '1000.00',
-        resolutionLabel: '15m',
         walletUnlocked: true,
       },
       client,
@@ -732,7 +718,6 @@ describe('agent chat service', () => {
           network: 'deepx_devnet',
           pairLabel: 'BTC-USDC',
           priceLabel: '68250.40',
-          resolutionLabel: '15m',
           walletUnlocked: true,
         },
       }),

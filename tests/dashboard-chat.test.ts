@@ -18,7 +18,6 @@ describe('dashboard chat', () => {
       network: 'deepx_testnet',
       pairLabel: 'BTC-USDC',
       priceLabel: '68250.40',
-      resolutionLabel: '15m',
       walletUnlocked: true,
     });
 

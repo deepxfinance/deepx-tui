@@ -24,7 +24,7 @@ const ORDERBOOK_GROUP_TO_TRADES_GAP = 20;
 export const DEFAULT_ORDERBOOK_DEPTH = 20;
 export const DEFAULT_TRADES_DEPTH = 20;
 
-type BlinkSection = 'mid' | 'stats';
+type BlinkSection = 'mid';
 
 type BlinkFrames = Record<BlinkSection, number>;
 
@@ -191,8 +191,6 @@ export const OrderbookPanel: FC<OrderbookPanelProps> = ({
   }, [blinkFrames, rowBlinkFrames]);
 
   const isMidBlinking = isBlinkVisible(blinkFrames.mid);
-  const isStatsBlinking = isBlinkVisible(blinkFrames.stats);
-
   return (
     <Box
       borderStyle="round"
@@ -219,11 +217,16 @@ export const OrderbookPanel: FC<OrderbookPanelProps> = ({
         </Text>
       </Box>
       <Box marginBottom={1}>
-        <Text
-          color={isStatsBlinking ? MID_HIGHLIGHT_COLOR : MUTED_COLOR}
-          bold={isStatsBlinking}
-        >
-          {`1H ${formatPercentChange(priceChange1h)}  24H ${formatPercentChange(priceChange24h)}  VOL ${formatVolume(volume24h)}`}
+        <Text color={MUTED_COLOR}>
+          {'1H '}
+          <Text color={getPriceChangeColor(priceChange1h)}>
+            {formatPercentChange(priceChange1h)}
+          </Text>
+          {'  24H '}
+          <Text color={getPriceChangeColor(priceChange24h)}>
+            {formatPercentChange(priceChange24h)}
+          </Text>
+          {`  VOL ${formatVolume(volume24h)}`}
         </Text>
       </Box>
       <Box>
@@ -460,7 +463,6 @@ export function calculateOrderBookHeatWidth(
 export function createEmptyBlinkFrames(): BlinkFrames {
   return {
     mid: 0,
-    stats: 0,
   };
 }
 
@@ -483,11 +485,6 @@ export function buildOrderbookBlinkSignatures(input: {
 }): BlinkSignatures {
   return {
     mid: input.latestPrice,
-    stats: [
-      input.priceChange1h ?? '',
-      input.priceChange24h ?? '',
-      input.volume24h ?? '',
-    ].join('|'),
   };
 }
 
@@ -514,9 +511,6 @@ export function mergeBlinkFramesForChangedSections(
     mid: shouldBlinkSection(previous.mid, next.mid)
       ? ORDERBOOK_DATA_BLINK_TOTAL_FRAMES
       : current.mid,
-    stats: shouldBlinkSection(previous.stats, next.stats)
-      ? ORDERBOOK_DATA_BLINK_TOTAL_FRAMES
-      : current.stats,
   };
 }
 
@@ -535,7 +529,6 @@ export function mergeRowBlinkFramesForChangedItems(
 export function decayBlinkFrames(input: BlinkFrames): BlinkFrames {
   return {
     mid: Math.max(0, input.mid - 1),
-    stats: Math.max(0, input.stats - 1),
   };
 }
 
@@ -743,6 +736,14 @@ export function formatPercentChange(value?: number) {
 
   const prefix = (value as number) > 0 ? '+' : '';
   return `${prefix}${(value as number).toFixed(2)}%`;
+}
+
+export function getPriceChangeColor(value?: number) {
+  if (!Number.isFinite(value) || value === 0) {
+    return MUTED_COLOR;
+  }
+
+  return (value as number) > 0 ? BUY_COLOR : SELL_COLOR;
 }
 
 export function formatVolume(value?: number) {

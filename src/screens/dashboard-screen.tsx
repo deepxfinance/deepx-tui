@@ -796,7 +796,6 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
           network: network.id,
           pairLabel: currentPair.label,
           priceLabel,
-          resolutionLabel,
           walletUnlocked,
         },
         onText: setStreamingAssistantReply,

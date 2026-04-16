@@ -19,6 +19,7 @@ import {
   getLiveStatusDotSegment,
   getOrderbookHeaderRow,
   getOrderbookStatusSegments,
+  getPriceChangeColor,
   getTradesHeaderRow,
   hasActiveBlinkFrames,
   hasActiveRowBlinkFrames,
@@ -172,6 +173,13 @@ describe('orderbook panel', () => {
     expect(formatVolume(9_876_543)).toBe('9.88M');
   });
 
+  test('maps price change direction to exchange colors', () => {
+    expect(getPriceChangeColor(undefined)).toBe('gray');
+    expect(getPriceChangeColor(0)).toBe('gray');
+    expect(getPriceChangeColor(1.5)).toBe('#28DE9C');
+    expect(getPriceChangeColor(-1.5)).toBe('#FF3131');
+  });
+
   test('pads table headers to the same columns as the data rows', () => {
     expect(getOrderbookHeaderRow()).toBe('PRICE      SIZE      TOTAL');
     expect(getTradesHeaderRow()).toBe('TIME      PRICE    SIZE');
@@ -243,7 +251,6 @@ describe('orderbook panel', () => {
       }),
     ).toEqual({
       mid: '100.25',
-      stats: '1.2|-3.4|5000',
     });
   });
 
@@ -275,16 +282,13 @@ describe('orderbook panel', () => {
         createEmptyBlinkFrames(),
         {
           mid: '100.00',
-          stats: '1|2|3',
         },
         {
           mid: '101.00',
-          stats: '1|2|3',
         },
       ),
     ).toEqual({
       mid: 6,
-      stats: 0,
     });
   });
 
@@ -314,17 +318,14 @@ describe('orderbook panel', () => {
     expect(
       decayBlinkFrames({
         mid: 2,
-        stats: 1,
       }),
     ).toEqual({
       mid: 1,
-      stats: 0,
     });
     expect(hasActiveBlinkFrames(createEmptyBlinkFrames())).toBe(false);
     expect(
       hasActiveBlinkFrames({
         mid: 1,
-        stats: 0,
       }),
     ).toBe(true);
     expect(
