@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   buildCommandPaletteItems,
   buildPairPickerItems,
+  buildPairPickerOptions,
   formatHistoryLine,
   formatNetworkLine,
   formatShellComposerLine,
@@ -191,17 +192,22 @@ describe('dashboard input helpers', () => {
   });
 
   test('builds pair picker items from market pairs', () => {
-    expect(
-      buildPairPickerItems([
-        { label: 'SOL-USDC', kind: 'perp' },
-        { label: 'BTC-USDC', kind: 'perp' },
-        { label: 'ETH-USDC', kind: 'perp' },
-        { label: 'SOL/USDC', kind: 'spot' },
-      ]),
-    ).toEqual([
+    const pairs = [
+      { label: 'SOL-USDC', kind: 'perp' },
+      { label: 'BTC-USDC', kind: 'perp' },
+      { label: 'ETH-USDC', kind: 'perp' },
+      { label: 'SOL/USDC', kind: 'spot' },
+    ];
+
+    expect(buildPairPickerItems(pairs)).toEqual([
       { label: 'ETH-USDC', description: 'PERP' },
       { label: 'SOL-USDC', description: 'PERP' },
       { label: 'SOL/USDC', description: 'SPOT' },
+    ]);
+    expect(buildPairPickerOptions(pairs)).toEqual([
+      { label: 'ETH-USDC', kind: 'perp' },
+      { label: 'SOL-USDC', kind: 'perp' },
+      { label: 'SOL/USDC', kind: 'spot' },
     ]);
   });
 

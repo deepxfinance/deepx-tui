@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { NetworkConfig } from '../config/networks';
 import {
@@ -129,6 +129,7 @@ export function useMarketData(input: {
   const [orderbookWebSocketDelayMs, setOrderbookWebSocketDelayMs] = useState<
     number | undefined
   >();
+  const marketStreamTokenRef = useRef(0);
 
   useEffect(() => {
     if (allPairs.length === 0) {
@@ -310,6 +311,11 @@ export function useMarketData(input: {
       return;
     }
 
+    const marketStreamToken = marketStreamTokenRef.current + 1;
+    marketStreamTokenRef.current = marketStreamToken;
+    const isActiveMarketStream = () =>
+      marketStreamTokenRef.current === marketStreamToken;
+
     setOrderbook(null);
     setTrades([]);
     setOrderbookError(undefined);
@@ -335,6 +341,10 @@ export function useMarketData(input: {
     };
 
     websocket.addEventListener('open', () => {
+      if (!isActiveMarketStream()) {
+        return;
+      }
+
       setIsOrderbookConnected(true);
       setIsCandleStreamConnected(true);
       const payload = JSON.stringify({
@@ -388,6 +398,10 @@ export function useMarketData(input: {
       if (isWebSocketPongMessage(result) && pendingPingAt != null) {
         setOrderbookWebSocketDelayMs(Date.now() - pendingPingAt);
         pendingPingAt = null;
+        return;
+      }
+
+      if (!isSelectedMarketMessage(result, currentPair.label)) {
         return;
       }
 
@@ -545,6 +559,18 @@ export function isWebSocketPongMessage(input: {
   return [input.action, input.type, input.channel, input.message].some(
     (value) => value?.toLowerCase() === 'pong',
   );
+}
+
+export function isSelectedMarketMessage(
+  input: { market?: { name?: string } },
+  selectedMarketName: string,
+): boolean {
+  const marketName = input.market?.name?.trim();
+  if (!marketName) {
+    return true;
+  }
+
+  return marketName === selectedMarketName;
 }
 
 function getCurrentPair(

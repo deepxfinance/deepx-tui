@@ -1,6 +1,6 @@
 import { Box, Text } from 'ink';
 import type { FC } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { padRight } from '../lib/format';
 import { formatLocalTimeOfDayWithSeconds } from '../lib/time';
@@ -105,8 +105,14 @@ export const OrderbookPanel: FC<OrderbookPanelProps> = ({
   const [rowBlinkFrames, setRowBlinkFrames] = useState<RowBlinkFrames>(
     createEmptyRowBlinkFrames(depth, tradesDepth),
   );
-  const rows = buildOrderBookDisplayRows(orderbook, depth);
-  const tradeRows = buildTradeRows(trades, tradesDepth);
+  const rows = useMemo(
+    () => buildOrderBookDisplayRows(orderbook, depth),
+    [depth, orderbook],
+  );
+  const tradeRows = useMemo(
+    () => buildTradeRows(trades, tradesDepth),
+    [trades, tradesDepth],
+  );
   const statusSegments = getOrderbookStatusSegments(statusFrame, isConnected);
   const previousBlinkSignaturesRef = useRef<BlinkSignatures | null>(null);
   const previousRowBlinkSignaturesRef = useRef<RowBlinkSignatures | null>(null);

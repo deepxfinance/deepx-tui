@@ -15,6 +15,7 @@ import {
 import {
   buildCommandPaletteItems,
   buildPairPickerItems,
+  buildPairPickerOptions,
   formatHistoryLine,
   formatNetworkLine,
   formatShellComposerLine,
@@ -335,9 +336,13 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     () => [...pairGroups.perp, ...pairGroups.spot],
     [pairGroups.perp, pairGroups.spot],
   );
-  const pairPickerItems = useMemo(
-    () => buildPairPickerItems(pairOptions),
+  const pairPickerOptions = useMemo(
+    () => buildPairPickerOptions(pairOptions),
     [pairOptions],
+  );
+  const pairPickerItems = useMemo(
+    () => buildPairPickerItems(pairPickerOptions),
+    [pairPickerOptions],
   );
   const commandPaletteItems = useMemo(
     () => buildCommandPaletteItems(inputValue),
@@ -448,7 +453,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       }
 
       if (key.return) {
-        const nextPair = pairOptions[pairPickerIndex];
+        const nextPair = pairPickerOptions[pairPickerIndex];
         if (nextPair && pendingCommand) {
           activatePair(nextPair);
           setOutputView({ kind: pendingCommand });

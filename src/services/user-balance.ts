@@ -1166,7 +1166,7 @@ function buildWalletPortfolioSummary(input: {
       : `margin ratio ${input.marginRatio}`;
 
   return [
-    `${input.network} wallet portfolio for ${input.walletAddress}:`,
+    `${input.network} wallet portfolio for ${input.walletAddress}`,
     `total value ${formatUsdDisplay(input.totalValueRaw)}`,
     `net value ${formatUsdDisplay(input.netValueRaw)}`,
     `deposits ${formatUsdDisplay(input.totalDepositsRaw)}`,

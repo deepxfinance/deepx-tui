@@ -23,6 +23,11 @@ export type PairPickerItem = {
   description: string;
 };
 
+type PairPickerOption = {
+  kind: string;
+  label: string;
+};
+
 const CHAT_PLACEHOLDER = 'Type a message or use /orderbook, /help';
 const HISTORY_PLACEHOLDER = 'No history yet.';
 const COMMAND_PALETTE_ITEMS: CommandPaletteItem[] = [
@@ -309,8 +314,15 @@ const PAIR_PICKER_LABEL_PRIORITY = new Map([
 ]);
 
 export function buildPairPickerItems(
-  pairs: Array<{ kind: string; label: string }>,
+  pairs: PairPickerOption[],
 ): PairPickerItem[] {
+  return buildPairPickerOptions(pairs).map((pair) => ({
+    label: pair.label,
+    description: pair.kind.toUpperCase(),
+  }));
+}
+
+export function buildPairPickerOptions(pairs: PairPickerOption[]) {
   return pairs
     .filter((pair) => !HIDDEN_PAIR_PICKER_LABELS.has(pair.label))
     .toSorted((left, right) => {
@@ -324,9 +336,5 @@ export function buildPairPickerItems(
       }
 
       return left.label.localeCompare(right.label);
-    })
-    .map((pair) => ({
-      label: pair.label,
-      description: pair.kind.toUpperCase(),
-    }));
+    });
 }
