@@ -154,6 +154,9 @@ describe('dashboard welcome logo', () => {
     expect(buildHelpLines('deepx')).toContain(
       '- optional debug mode writes expanded logs to a local debug file',
     );
+    expect(buildHelpLines('deepx')).toContain(
+      '- Up / Down: move through pair menus and partial slash-command matches; exact slash commands return Up / Down to history',
+    );
   });
 
   test('starts with an empty workspace in both modes', () => {

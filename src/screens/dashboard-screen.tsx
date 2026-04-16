@@ -17,7 +17,6 @@ import {
   buildCommandPaletteItems,
   buildPairPickerItems,
   buildPairPickerOptions,
-  formatHistoryLine,
   formatNetworkLine,
   formatShellComposerLine,
   getHistoryValue,
@@ -33,6 +32,7 @@ import {
   removeWordAfter,
   removeWordBefore,
   type ShellCommand,
+  shouldCommandPaletteCaptureArrows,
 } from '../lib/dashboard-input';
 import { formatErrorMessage } from '../lib/error-format';
 import {
@@ -498,7 +498,10 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       return;
     }
 
-    if (isCommandPaletteVisible) {
+    if (
+      isCommandPaletteVisible &&
+      shouldCommandPaletteCaptureArrows(composerValue)
+    ) {
       if (key.upArrow) {
         setCommandPaletteIndex((current) =>
           moveSelectionIndex(current, commandPaletteItems.length, -1),
@@ -1179,7 +1182,6 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
         </Box>
       ) : null}
 
-      <Text color="gray">{formatHistoryLine(inputHistory)}</Text>
       <InputSection>
         {formatShellComposerLine(inputValue, inputCursorIndex, true)}
       </InputSection>
@@ -1367,7 +1369,8 @@ const PairPicker: FC<PairPickerProps> = ({ items, selectedIndex }) => {
         </Text>
       ))}
       <Text color="gray">
-        Up/Down move. Enter confirms. Esc returns to input.
+        Up/Down move while filtering. Exact commands return Up/Down to history.
+        Enter confirms. Esc returns to input.
       </Text>
     </Box>
   );

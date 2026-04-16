@@ -29,7 +29,6 @@ type PairPickerOption = {
 };
 
 const CHAT_PLACEHOLDER = 'Type a message or use /orderbook, /help';
-const HISTORY_PLACEHOLDER = 'No history yet.';
 const COMMAND_PALETTE_ITEMS: CommandPaletteItem[] = [
   {
     command: 'orderbook',
@@ -224,16 +223,12 @@ export function buildCommandPaletteItems(input: string): CommandPaletteItem[] {
   );
 }
 
-export function formatHistoryLine(entries: string[], maxItems = 3): string {
-  const visibleEntries = entries
-    .filter((entry) => entry.trim().length > 0)
-    .slice(-Math.max(maxItems, 1));
-
-  if (visibleEntries.length === 0) {
-    return `History: ${HISTORY_PLACEHOLDER}`;
+export function shouldCommandPaletteCaptureArrows(input: string) {
+  if (!isSlashCommandInput(input)) {
+    return false;
   }
 
-  return `History: ${visibleEntries.join('  |  ')}`;
+  return parseShellInput(input)?.kind !== 'command';
 }
 
 export function getHistoryValue(

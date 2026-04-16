@@ -4,7 +4,6 @@ import {
   buildCommandPaletteItems,
   buildPairPickerItems,
   buildPairPickerOptions,
-  formatHistoryLine,
   formatNetworkLine,
   formatShellComposerLine,
   getHistoryValue,
@@ -20,6 +19,7 @@ import {
   removeLineBefore,
   removeWordAfter,
   removeWordBefore,
+  shouldCommandPaletteCaptureArrows,
 } from '../src/lib/dashboard-input';
 
 describe('dashboard input helpers', () => {
@@ -170,10 +170,12 @@ describe('dashboard input helpers', () => {
     expect(buildCommandPaletteItems('/unknown')).toEqual([]);
   });
 
-  test('renders recent history entries above the input', () => {
-    expect(formatHistoryLine(['hello', '/candle', 'orderbook:ETH-USDC'])).toBe(
-      'History: hello  |  /candle  |  orderbook:ETH-USDC',
-    );
+  test('returns command palette arrows to history for exact slash commands', () => {
+    expect(shouldCommandPaletteCaptureArrows('/')).toBe(true);
+    expect(shouldCommandPaletteCaptureArrows('/ord')).toBe(true);
+    expect(shouldCommandPaletteCaptureArrows('/orderbook')).toBe(false);
+    expect(shouldCommandPaletteCaptureArrows('/orderbook   ')).toBe(false);
+    expect(shouldCommandPaletteCaptureArrows('buy eth')).toBe(false);
   });
 
   test('renders the persistent network line', () => {
