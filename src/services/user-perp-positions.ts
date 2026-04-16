@@ -57,7 +57,21 @@ type PositionPanelRow = {
   key: string;
   text: string;
   tone: 'green' | 'red' | 'white' | 'gray';
-};
+} & (
+  | {
+      variant: 'message';
+    }
+  | {
+      variant: 'position';
+      marketLabel: string;
+      sideLabel: string;
+      sizeLabel: string;
+      entryLabel: string;
+      pnlLabel: string;
+      sideTone: 'green' | 'red';
+      pnlTone: 'green' | 'red' | 'white';
+    }
+);
 
 export function useUserPerpPositions(input: {
   network: NetworkConfig;
@@ -393,7 +407,14 @@ export function buildPositionPanelRows(input: {
   maxRows: number;
 }): PositionPanelRow[] {
   if (input.positions.length === 0) {
-    return [{ key: 'empty', text: 'No open perp positions.', tone: 'gray' }];
+    return [
+      {
+        key: 'empty',
+        text: 'No open perp positions.',
+        tone: 'gray',
+        variant: 'message',
+      },
+    ];
   }
 
   const rows = input.positions
@@ -425,6 +446,8 @@ export function buildPositionPanelRows(input: {
       input.overview[pairLabel]?.latestPrice,
     );
     const pnlLabel = formatSignedMoney(pnlValue, 6, 2);
+    const sideTone = position.isLong ? 'green' : 'red';
+    const pnlTone = pnlValue > 0n ? 'green' : pnlValue < 0n ? 'red' : 'white';
 
     return {
       key: `${position.owner}-${position.marketId}`,
@@ -432,7 +455,15 @@ export function buildPositionPanelRows(input: {
         sizeLabel,
         7,
       )} ${padRight(entryLabel, 8)} ${pnlLabel}`,
-      tone: pnlValue > 0n ? 'green' : pnlValue < 0n ? 'red' : 'white',
+      tone: pnlTone,
+      variant: 'position',
+      marketLabel: padRight(pairLabel, 8),
+      sideLabel: padRight(sideLabel, 7),
+      sizeLabel: padRight(sizeLabel, 7),
+      entryLabel: padRight(entryLabel, 8),
+      pnlLabel,
+      sideTone,
+      pnlTone,
     };
   });
 }

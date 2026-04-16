@@ -43,11 +43,25 @@ export const PositionsPanel: FC<PositionsPanelProps> = ({
     >
       <Text color={isFocused ? 'yellow' : 'gray'}>Positions</Text>
       <Text color="gray">{getPositionPanelHeader()}</Text>
-      {rows.map((row) => (
-        <Text key={row.key} color={row.tone}>
-          {row.text}
-        </Text>
-      ))}
+      {rows.map((row) =>
+        row.variant === 'message' ? (
+          <Text key={row.key} color={row.tone}>
+            {row.text}
+          </Text>
+        ) : (
+          <Text key={row.key}>
+            <Text>{row.marketLabel}</Text>
+            <Text> </Text>
+            <Text color={row.sideTone}>{row.sideLabel}</Text>
+            <Text> </Text>
+            <Text>{row.sizeLabel}</Text>
+            <Text> </Text>
+            <Text>{row.entryLabel}</Text>
+            <Text> </Text>
+            <Text color={row.pnlTone}>{row.pnlLabel}</Text>
+          </Text>
+        ),
+      )}
     </Box>
   );
 };

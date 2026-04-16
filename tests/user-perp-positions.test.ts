@@ -267,12 +267,50 @@ describe('buildPositionPanelRows', () => {
     });
 
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.text).toContain('ETH-USDC');
-    expect(rows[0]?.text).toContain('LONG10x');
-    expect(rows[0]?.text).toContain('0.125');
-    expect(rows[0]?.text).toContain('1820.5');
-    expect(rows[0]?.text).toContain('+9.93');
-    expect(rows[0]?.tone).toBe('green');
+    const row = rows[0];
+    expect(row?.text).toContain('ETH-USDC');
+    expect(row?.text).toContain('LONG10x');
+    expect(row?.text).toContain('0.125');
+    expect(row?.text).toContain('1820.5');
+    expect(row?.text).toContain('+9.93');
+    expect(row?.variant).toBe('position');
+    if (!row || row.variant !== 'position') {
+      throw new Error('expected position row');
+    }
+
+    expect(row.sideTone).toBe('green');
+    expect(row.pnlTone).toBe('green');
+    expect(row.tone).toBe('green');
+  });
+
+  test('tracks short-side and negative pnl colors separately', () => {
+    const rows = buildPositionPanelRows({
+      positions: [
+        createPosition({
+          marketId: 3,
+          isLong: false,
+          baseAssetAmount: '0.125',
+          entryPrice: '1820.5',
+          leverage: 10,
+          unrealizedPnl: '-1',
+        }),
+      ],
+      pairs: perpPairs,
+      overview: {
+        'ETH-USDC': { latestPrice: 1900 },
+      },
+      maxRows: 3,
+    });
+
+    const row = rows[0];
+    expect(row?.variant).toBe('position');
+    if (!row || row.variant !== 'position') {
+      throw new Error('expected position row');
+    }
+
+    expect(row.sideTone).toBe('red');
+    expect(row.pnlTone).toBe('red');
+    expect(row.tone).toBe('red');
   });
 
   test('returns an empty-state row when there are no positions', () => {
@@ -288,6 +326,7 @@ describe('buildPositionPanelRows', () => {
         key: 'empty',
         text: 'No open perp positions.',
         tone: 'gray',
+        variant: 'message',
       },
     ]);
   });
