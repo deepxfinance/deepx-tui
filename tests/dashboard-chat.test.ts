@@ -41,6 +41,9 @@ describe('dashboard chat', () => {
       'Use deepx_get_wallet_portfolio when the user asks about wallet portfolio, balance, collateral, borrowing, positions, or current account exposure.',
     );
     expect(prompt).toContain('never set confirm=true from AI chat');
+    expect(prompt).toContain(
+      'If the user wants to create a subaccount but has not provided a name, ask for the account name before calling deepx_create_subaccount.',
+    );
     expect(prompt).toContain('chooses Confirm in the below-input selector');
     expect(prompt).toContain(
       'Do not tell the user to use an Order Entry panel',

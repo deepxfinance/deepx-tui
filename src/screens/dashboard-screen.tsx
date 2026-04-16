@@ -926,6 +926,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
         setStreamingAssistantReply('');
         setPendingAgentAction(agentResult.action);
         setPendingAgentContinuation(agentResult.continuation);
+        setAgentActionInputMode('selector');
         setChatMessages((messages) =>
           appendChatMessage(
             messages,

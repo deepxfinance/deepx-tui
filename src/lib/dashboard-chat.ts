@@ -98,6 +98,7 @@ export function buildChatSystemPrompt(context: ChatPromptContext): string {
     'Use deepx_get_wallet_portfolio when the user asks about wallet portfolio, balance, collateral, borrowing, positions, or current account exposure.',
     'Use deepx_list_subaccounts when the user asks which subaccounts belong to the local wallet.',
     'Use deepx_create_subaccount only to prepare subaccount creation details; never set confirm=true from AI chat.',
+    'If the user wants to create a subaccount but has not provided a name, ask for the account name before calling deepx_create_subaccount.',
     'Use deepx_place_order to prepare requested order details; never set confirm=true from AI chat.',
     'Use deepx_close_position for position exits and deepx_update_position for take-profit or stop-loss changes when those actions are requested.',
     `The current terminal session network is ${context.network}; use that network for tool calls unless the user explicitly asks for a different one.`,

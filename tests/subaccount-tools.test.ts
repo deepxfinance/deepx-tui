@@ -6,9 +6,75 @@ import {
   createSubaccountTool,
   encodeSubaccountName,
   initializeSubaccountLive,
+  SUBACCOUNT_INITIALIZE_ABI,
+  sendInitializeSubaccountTransaction,
 } from '../src/services/subaccount-tools';
 
 describe('subaccount tools', () => {
+  test('uses the provided initializeSubaccount ABI shape', () => {
+    expect(SUBACCOUNT_INITIALIZE_ABI).toEqual([
+      {
+        inputs: [
+          {
+            internalType: 'bytes',
+            name: 'name',
+            type: 'bytes',
+          },
+        ],
+        name: 'initializeSubaccount',
+        outputs: [],
+        stateMutability: 'nonpayable',
+        type: 'function',
+      },
+    ]);
+  });
+
+  test('sends initializeSubaccount through the signer with utf8 name bytes', async () => {
+    const sendCalls: Array<Record<string, unknown>> = [];
+    const populateCalls: Uint8Array[] = [];
+
+    const txHash = await sendInitializeSubaccountTransaction({
+      contract: {
+        getFunction(name) {
+          expect(name).toBe('initializeSubaccount');
+          return {
+            async populateTransaction(nameBytes) {
+              populateCalls.push(nameBytes);
+              return {
+                to: '0x1111000000000000000000000000000000001111',
+                data: '0xdeadbeef',
+              };
+            },
+          };
+        },
+      },
+      signer: {
+        async sendTransaction(request) {
+          sendCalls.push(request);
+          return {
+            hash: '0xabc123',
+            async wait() {
+              return { status: 1 };
+            },
+          };
+        },
+      },
+      chainId: 778,
+      name: 'main',
+    });
+
+    expect(txHash).toBe('0xabc123');
+    expect(Array.from(populateCalls[0] ?? [])).toEqual([109, 97, 105, 110]);
+    expect(sendCalls).toEqual([
+      {
+        to: '0x1111000000000000000000000000000000001111',
+        data: '0xdeadbeef',
+        gasLimit: 1000000n,
+        chainId: 778,
+      },
+    ]);
+  });
+
   test('encodes subaccount names as utf8 bytes', () => {
     expect(Array.from(encodeSubaccountName('main'))).toEqual([
       109, 97, 105, 110,
