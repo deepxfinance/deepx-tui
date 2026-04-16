@@ -21,11 +21,6 @@ const CHAT_PLACEHOLDER = 'Type a message or use /candle, /orderbook, /help';
 const HISTORY_PLACEHOLDER = 'No history yet.';
 const COMMAND_PALETTE_ITEMS: CommandPaletteItem[] = [
   {
-    command: 'candle',
-    label: '/candle',
-    description: 'Open the live candle chart workspace',
-  },
-  {
     command: 'orderbook',
     label: '/orderbook',
     description: 'Open the live orderbook ladder workspace',

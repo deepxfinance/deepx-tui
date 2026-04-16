@@ -48,10 +48,10 @@ describe('dashboard input helpers', () => {
 
   test('builds a filtered slash-command palette', () => {
     expect(buildCommandPaletteItems('/').map((item) => item.label)).toEqual([
-      '/candle',
       '/orderbook',
       '/help',
     ]);
+    expect(buildCommandPaletteItems('/can')).toEqual([]);
     expect(buildCommandPaletteItems('/ord').map((item) => item.label)).toEqual([
       '/orderbook',
     ]);
