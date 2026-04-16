@@ -21,7 +21,8 @@ describe('agent tools', () => {
   test('exposes current supported tool names', () => {
     expect(DEEPX_AGENT_TOOL_NAMES).toEqual([
       'deepx_list_markets',
-      'deepx_get_user_balance',
+      'deepx_get_market_price_info',
+      'deepx_get_wallet_portfolio',
       'deepx_list_subaccounts',
       'deepx_create_subaccount',
       'deepx_place_order',
@@ -45,14 +46,43 @@ describe('agent tools', () => {
     });
   });
 
-  test('routes balance lookups through the user balance tool', async () => {
+  test('routes market price lookups through the market price tool', async () => {
     const result = await executeDeepxAgentTool(
-      'deepx_get_user_balance',
+      'deepx_get_market_price_info',
+      {
+        network: 'deepx_testnet',
+        pair: 'ETH-USDC',
+      },
+      {
+        getMarketPriceInfo: async ({ network, pair }) => ({
+          pair,
+          kind: 'perp',
+          latestPrice: '1925.00',
+          last24hChange: '+25.00',
+          last24hChangePercent: '+1.32%',
+          summary: `${pair} on ${network.id}`,
+        }),
+      },
+    );
+
+    expect(result).toEqual({
+      pair: 'ETH-USDC',
+      kind: 'perp',
+      latestPrice: '1925.00',
+      last24hChange: '+25.00',
+      last24hChangePercent: '+1.32%',
+      summary: 'ETH-USDC on deepx_testnet',
+    });
+  });
+
+  test('routes portfolio lookups through the wallet portfolio tool', async () => {
+    const result = await executeDeepxAgentTool(
+      'deepx_get_wallet_portfolio',
       {
         network: 'deepx_testnet',
       },
       {
-        getUserBalance: async ({ network } = {}) => ({
+        getWalletPortfolio: async ({ network } = {}) => ({
           status: 'success',
           network: network ?? 'deepx_devnet',
           walletAddress: '0xabc',
@@ -72,7 +102,8 @@ describe('agent tools', () => {
           totalMarginRequired: '5.0',
           totalMaintenanceMarginRequired: '0.0',
           assets: [],
-          summary: 'stubbed balance',
+          positions: [],
+          summary: 'stubbed wallet portfolio',
         }),
       },
     );
@@ -81,18 +112,18 @@ describe('agent tools', () => {
       status: 'success',
       network: 'deepx_testnet',
       walletAddress: '0xabc',
-      summary: 'stubbed balance',
+      summary: 'stubbed wallet portfolio',
     });
   });
 
   test('normalizes network aliases for tool execution', async () => {
     const result = await executeDeepxAgentTool(
-      'deepx_get_user_balance',
+      'deepx_get_wallet_portfolio',
       {
         network: 'testnet',
       },
       {
-        getUserBalance: async ({ network } = {}) => ({
+        getWalletPortfolio: async ({ network } = {}) => ({
           status: 'success',
           network: network ?? 'deepx_devnet',
           walletAddress: '0xabc',
@@ -112,7 +143,8 @@ describe('agent tools', () => {
           totalMarginRequired: '5.0',
           totalMaintenanceMarginRequired: '0.0',
           assets: [],
-          summary: 'stubbed balance',
+          positions: [],
+          summary: 'stubbed wallet portfolio',
         }),
       },
     );
@@ -121,7 +153,7 @@ describe('agent tools', () => {
       status: 'success',
       network: 'deepx_testnet',
       walletAddress: '0xabc',
-      summary: 'stubbed balance',
+      summary: 'stubbed wallet portfolio',
     });
   });
 

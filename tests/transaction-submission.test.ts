@@ -44,7 +44,7 @@ describe('transaction submission', () => {
     });
     expect(calls).toEqual([
       'send:eth_sendRawTransaction:0xsigned',
-      'wait:0xabc:1:15000',
+      'wait:0xabc:1:60000',
     ]);
   });
 
@@ -65,13 +65,13 @@ describe('transaction submission', () => {
         signedTx: '0xsigned',
       }),
     ).rejects.toThrow(
-      'RPC transaction submission failed: RPC accepted transaction 0xmissing, but no receipt was available after 15s.\n' +
+      'RPC transaction submission failed: RPC accepted transaction 0xmissing, but no receipt was available after 60s.\n' +
         'RPC: https://devnet-rpc-new.deepx.fi\n' +
         'Tx Hash: 0xmissing\n' +
         'Request Body:\n' +
         '{"jsonrpc":"2.0","method":"eth_sendRawTransaction","params":["0xsigned"]}\n' +
         'Response Body:\n' +
-        '{"txHash":"0xmissing","receipt":null,"timeoutMs":15000}',
+        '{"txHash":"0xmissing","receipt":null,"timeoutMs":60000}',
     );
   });
 

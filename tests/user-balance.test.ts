@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
 import {
-  fetchUserBalance,
-  getUserBalanceTool,
+  fetchWalletPortfolio,
+  getWalletPortfolioTool,
   listUserSubaccountsTool,
   SUBACCOUNT_ABI,
 } from '../src/services/user-balance';
@@ -19,7 +19,7 @@ afterEach(() => {
   restoreFetch = undefined;
 });
 
-describe('user balance tool', () => {
+describe('wallet portfolio tool', () => {
   const walletRecord = {
     version: 1 as const,
     network: 'deepx_devnet' as const,
@@ -75,7 +75,7 @@ describe('user balance tool', () => {
   });
 
   test('returns unavailable when no local wallet exists', async () => {
-    const result = await getUserBalanceTool(
+    const result = await getWalletPortfolioTool(
       { network: 'deepx_devnet' },
       {
         async readWalletRecord() {
@@ -94,7 +94,7 @@ describe('user balance tool', () => {
 
   test('fetches balances for the first contract subaccount', async () => {
     const calls: string[] = [];
-    const result = await getUserBalanceTool(
+    const result = await getWalletPortfolioTool(
       { network: 'deepx_devnet' },
       {
         async readWalletRecord() {
@@ -162,7 +162,7 @@ describe('user balance tool', () => {
   });
 
   test('returns unavailable when the wallet has no contract subaccounts', async () => {
-    const result = await getUserBalanceTool(
+    const result = await getWalletPortfolioTool(
       { network: 'deepx_devnet' },
       {
         async readWalletRecord() {
@@ -302,8 +302,8 @@ describe('user balance tool', () => {
     });
   });
 
-  test('builds a live balance summary from contract data', async () => {
-    const result = await fetchUserBalance({
+  test('builds a live wallet portfolio summary from contract data', async () => {
+    const result = await fetchWalletPortfolio({
       network: 'deepx_devnet',
       walletAddress: '0x1234000000000000000000000000000000005678',
       subaccountAddress: '0x1234000000000000000000000000000000005678',
@@ -473,7 +473,32 @@ describe('user balance tool', () => {
       },
     ]);
 
+    expect(result.positions).toEqual([
+      {
+        marketId: 3,
+        pair: 'ETH-USDC',
+        side: 'LONG',
+        size: '0.5',
+        entryPrice: '1900.0',
+        markPrice: '2000.0',
+        unrealizedPnl: '50.0',
+        unrealizedPnlDisplay: '$50.00',
+      },
+      {
+        marketId: 4,
+        pair: 'SOL-USDC',
+        side: 'SHORT',
+        size: '4.0',
+        entryPrice: '120.0',
+        markPrice: '150.0',
+        unrealizedPnl: '-120.0',
+        unrealizedPnlDisplay: '-$120.00',
+      },
+    ]);
+
     expect(result.summary).toContain('total value $3,730.00');
+    expect(result.summary).toContain('wallet portfolio');
+    expect(result.summary).toContain('positions unrealized PnL -$70.00');
     expect(result.summary).toContain('margin ratio 5.37');
   });
 });

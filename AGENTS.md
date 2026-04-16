@@ -66,6 +66,7 @@ When modifying code:
 - Prefer editing existing modules over creating parallel abstractions
 - Keep terminal output deterministic where possible
 - Use ASCII unless a file already requires non-ASCII characters
+- When a user provides an ABI, keep the ABI definition exactly aligned with the user-provided shape, names, and types; do not rewrite it into shorthand signatures or rename fields
 
 ---
 

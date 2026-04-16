@@ -1,7 +1,11 @@
 import type { NetworkConfig } from '../config/networks';
 import { normalizeUnixTimestamp } from '../lib/time';
 import { logError, logNetworkRequest, logNetworkResponse } from './logger';
-import type { MarketPair } from './market-catalog';
+import {
+  getNetworkMarkets,
+  type MarketPair,
+  type PairKind,
+} from './market-catalog';
 
 export const DEFAULT_CANDLE_HISTORY_LIMIT = 150;
 
@@ -12,6 +16,15 @@ export type CandleBar = {
   low: number;
   close: number;
   volume: number;
+};
+
+export type MarketPriceInfo = {
+  pair: string;
+  kind: PairKind;
+  latestPrice: string;
+  last24hChange: string;
+  last24hChangePercent: string;
+  summary: string;
 };
 
 type ApiEnvelope<T> = {
@@ -78,6 +91,45 @@ export async function fetchCandles(input: {
   }));
 
   return bars.reverse().slice(-limit);
+}
+
+export async function fetchMarketPriceInfo(input: {
+  network: NetworkConfig;
+  pair: string;
+}): Promise<MarketPriceInfo> {
+  const market = await findMarketPair(input.network, input.pair);
+  const candles = await fetchCandles({
+    network: input.network,
+    pair: market,
+    timeFrame: '1h',
+    limit: 25,
+  });
+
+  const latestBar = candles.at(-1);
+  const anchorBar = candles[0];
+  if (!latestBar || !anchorBar) {
+    throw new Error(
+      `Price history is unavailable for ${market.label} on ${input.network.id}.`,
+    );
+  }
+
+  const latestPrice = latestBar.close;
+  const last24hChange = latestPrice - anchorBar.close;
+  const last24hChangePercent =
+    anchorBar.close === 0 ? 0 : (last24hChange / anchorBar.close) * 100;
+
+  return {
+    pair: market.label,
+    kind: market.kind,
+    latestPrice: latestPrice.toFixed(market.priceDecimal),
+    last24hChange: `${last24hChange >= 0 ? '+' : ''}${last24hChange.toFixed(market.priceDecimal)}`,
+    last24hChangePercent: `${last24hChangePercent >= 0 ? '+' : ''}${last24hChangePercent.toFixed(2)}%`,
+    summary: [
+      `${market.label} ${market.kind} market`,
+      `latest price ${latestPrice.toFixed(market.priceDecimal)}`,
+      `24h change ${last24hChange >= 0 ? '+' : ''}${last24hChange.toFixed(market.priceDecimal)} (${last24hChangePercent >= 0 ? '+' : ''}${last24hChangePercent.toFixed(2)}%)`,
+    ].join(', '),
+  };
 }
 
 export async function fetchJson<T>(
@@ -174,4 +226,19 @@ function timeFrameToMilliseconds(timeFrame: string): number {
     default:
       return 5 * 60_000;
   }
+}
+
+async function findMarketPair(network: NetworkConfig, requestedPair: string) {
+  const normalized = requestedPair.trim().toUpperCase();
+  const pair = (await getNetworkMarkets(network)).find(
+    (item) => item.label.toUpperCase() === normalized,
+  );
+
+  if (!pair) {
+    throw new Error(
+      `Unsupported pair "${requestedPair}" for ${network.id}. Use deepx_list_markets first.`,
+    );
+  }
+
+  return pair;
 }

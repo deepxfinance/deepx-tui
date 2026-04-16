@@ -4,6 +4,7 @@ import {
   alignTimestampToResolution,
   formatChartTimestamp,
   formatLocalTimeOfDay,
+  formatLocalTimeOfDayWithSeconds,
   normalizeUnixTimestamp,
 } from '../src/lib/time';
 
@@ -86,5 +87,16 @@ describe('formatLocalTimeOfDay', () => {
     expect(formatLocalTimeOfDay('2026-03-26T09:05:00Z', 'Asia/Taipei')).toBe(
       '17:05',
     );
+  });
+});
+
+describe('formatLocalTimeOfDayWithSeconds', () => {
+  test('formats timestamps with seconds in an explicit timezone', () => {
+    expect(
+      formatLocalTimeOfDayWithSeconds(
+        Date.UTC(2026, 2, 26, 9, 5, 7),
+        'America/New_York',
+      ),
+    ).toBe('05:05:07');
   });
 });

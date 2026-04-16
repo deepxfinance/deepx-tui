@@ -1,25 +1,34 @@
 import { Box, Text } from 'ink';
 import type { FC } from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { padRight } from '../lib/format';
+import { formatLocalTimeOfDayWithSeconds } from '../lib/time';
 
 const SELL_COLOR = '#FF3131';
 const BUY_COLOR = '#28DE9C';
+const SELL_BAR_COLOR = '#3E0F15';
+const BUY_BAR_COLOR = '#0D3B2D';
+const SELL_BAR_BLINK_COLOR = '#5A1620';
+const BUY_BAR_BLINK_COLOR = '#145440';
 const MID_HIGHLIGHT_COLOR = '#F0C36A';
 const MUTED_COLOR = 'gray';
 const PANEL_TITLE_COLOR = '#D7E3F4';
-const ORDERBOOK_STATUS_SHIMMER_COLORS = [
-  '#0F5C41',
-  '#1E9F6E',
-  '#28DE9C',
-  '#E8FFF6',
-  '#28DE9C',
-  '#1E9F6E',
-];
 const ORDERBOOK_STATUS_ANIMATION_INTERVAL_MS = 160;
+const ORDERBOOK_DATA_BLINK_INTERVAL_MS = 140;
+const ORDERBOOK_DATA_BLINK_TOTAL_FRAMES = 6;
+const ORDERBOOK_TABLE_WIDTH = 31;
+const ORDERBOOK_GROUP_WIDTH = ORDERBOOK_TABLE_WIDTH * 2;
+const TRADES_TABLE_WIDTH = 40;
+const ORDERBOOK_GROUP_TO_TRADES_GAP = 20;
 export const DEFAULT_ORDERBOOK_DEPTH = 20;
 export const DEFAULT_TRADES_DEPTH = 20;
+
+type BlinkSection = 'mid' | 'stats' | 'asks' | 'bids' | 'trades';
+
+type BlinkFrames = Record<BlinkSection, number>;
+
+type BlinkSignatures = Record<BlinkSection, string>;
 
 type StatusSegment = {
   key: string;
@@ -33,6 +42,11 @@ type OrderBookLevel = {
   price: string;
   qty: string;
   value: string;
+};
+
+type OrderBookDisplayRow = {
+  text: string;
+  heatWidth: number;
 };
 
 type TradeItem = {
@@ -79,9 +93,44 @@ export const OrderbookPanel: FC<OrderbookPanelProps> = ({
   tradesDepth = DEFAULT_TRADES_DEPTH,
 }) => {
   const [statusFrame, setStatusFrame] = useState(0);
-  const rows = buildOrderBookColumns(orderbook, depth);
+  const [blinkFrames, setBlinkFrames] = useState<BlinkFrames>(
+    createEmptyBlinkFrames(),
+  );
+  const rows = buildOrderBookDisplayRows(orderbook, depth);
   const tradeRows = buildTradeRows(trades, tradesDepth);
   const statusSegments = getOrderbookStatusSegments(statusFrame, isConnected);
+  const previousBlinkSignaturesRef = useRef<BlinkSignatures | null>(null);
+
+  useEffect(() => {
+    const nextSignatures = buildOrderbookBlinkSignatures({
+      latestPrice,
+      priceChange1h,
+      priceChange24h,
+      volume24h,
+      orderbook,
+      trades,
+    });
+    const previousSignatures = previousBlinkSignaturesRef.current;
+
+    if (previousSignatures) {
+      setBlinkFrames((current) =>
+        mergeBlinkFramesForChangedSections(
+          current,
+          previousSignatures,
+          nextSignatures,
+        ),
+      );
+    }
+
+    previousBlinkSignaturesRef.current = nextSignatures;
+  }, [
+    latestPrice,
+    orderbook,
+    priceChange1h,
+    priceChange24h,
+    trades,
+    volume24h,
+  ]);
 
   useEffect(() => {
     if (!isConnected) {
@@ -96,6 +145,24 @@ export const OrderbookPanel: FC<OrderbookPanelProps> = ({
     return () => clearInterval(timer);
   }, [isConnected]);
 
+  useEffect(() => {
+    if (!hasActiveBlinkFrames(blinkFrames)) {
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setBlinkFrames((current) => decayBlinkFrames(current));
+    }, ORDERBOOK_DATA_BLINK_INTERVAL_MS);
+
+    return () => clearInterval(timer);
+  }, [blinkFrames]);
+
+  const isMidBlinking = isBlinkVisible(blinkFrames.mid);
+  const isStatsBlinking = isBlinkVisible(blinkFrames.stats);
+  const areAsksBlinking = isBlinkVisible(blinkFrames.asks);
+  const areBidsBlinking = isBlinkVisible(blinkFrames.bids);
+  const areTradesBlinking = isBlinkVisible(blinkFrames.trades);
+
   return (
     <Box
       borderStyle="round"
@@ -108,75 +175,111 @@ export const OrderbookPanel: FC<OrderbookPanelProps> = ({
     >
       <Box justifyContent="space-between">
         <Text color={PANEL_TITLE_COLOR}>{`Orderbook ${pairLabel}`}</Text>
-        <Text backgroundColor={MID_HIGHLIGHT_COLOR} color="black" bold>
-          {` MID ${latestPrice} `}
+        <Text color={MUTED_COLOR}>
+          {statusSegments.map((segment) => (
+            <Text
+              key={segment.key}
+              color={segment.color}
+              dimColor={segment.dimColor}
+              bold={segment.bold}
+            >
+              {segment.text}
+            </Text>
+          ))}
         </Text>
       </Box>
       <Box marginBottom={1}>
-        <Text color={MUTED_COLOR}>
+        <Text
+          color={isStatsBlinking ? MID_HIGHLIGHT_COLOR : MUTED_COLOR}
+          bold={isStatsBlinking}
+        >
           {`1H ${formatPercentChange(priceChange1h)}  24H ${formatPercentChange(priceChange24h)}  VOL ${formatVolume(volume24h)}`}
         </Text>
       </Box>
       <Box>
-        <Box width="34%" marginRight={3}>
-          <Text color={SELL_COLOR}>SELL</Text>
+        <Box
+          flexDirection="column"
+          width={ORDERBOOK_GROUP_WIDTH}
+          marginRight={ORDERBOOK_GROUP_TO_TRADES_GAP}
+        >
+          <Box>
+            <Box width={ORDERBOOK_TABLE_WIDTH} marginRight={0}>
+              <Text color={BUY_COLOR}>BID</Text>
+            </Box>
+            <Box width={ORDERBOOK_TABLE_WIDTH}>
+              <Text color={SELL_COLOR}>ASK</Text>
+            </Box>
+          </Box>
+          <Box>
+            <Box
+              flexDirection="column"
+              width={ORDERBOOK_TABLE_WIDTH}
+              marginRight={0}
+            >
+              <Text color={MUTED_COLOR}>{getOrderbookHeaderRow()}</Text>
+              {rows.bids.map((row, index) => (
+                <Text key={buildOrderBookRowKey('bid', index)}>
+                  {renderOrderBookHeatRow({
+                    row,
+                    color: areBidsBlinking ? '#8FF7CA' : BUY_COLOR,
+                    backgroundColor: areBidsBlinking
+                      ? BUY_BAR_BLINK_COLOR
+                      : BUY_BAR_COLOR,
+                    bold: areBidsBlinking,
+                  })}
+                </Text>
+              ))}
+            </Box>
+            <Box flexDirection="column" width={ORDERBOOK_TABLE_WIDTH}>
+              <Text color={MUTED_COLOR}>{getOrderbookHeaderRow()}</Text>
+              {rows.asks.map((row, index) => (
+                <Text key={buildOrderBookRowKey('ask', index)}>
+                  {renderOrderBookHeatRow({
+                    row,
+                    color: areAsksBlinking ? '#FF9A9A' : SELL_COLOR,
+                    backgroundColor: areAsksBlinking
+                      ? SELL_BAR_BLINK_COLOR
+                      : SELL_BAR_COLOR,
+                    bold: areAsksBlinking,
+                  })}
+                </Text>
+              ))}
+            </Box>
+          </Box>
+          <Box justifyContent="center">
+            <Text
+              backgroundColor={isMidBlinking ? '#FFF7C7' : MID_HIGHLIGHT_COLOR}
+              color="black"
+              bold
+            >
+              {` MID ${latestPrice} `}
+            </Text>
+          </Box>
         </Box>
-        <Box width="34%" marginRight={3}>
-          <Text color={BUY_COLOR}>BUY</Text>
-        </Box>
-        <Box width="29%">
+        <Box flexDirection="column" width={TRADES_TABLE_WIDTH}>
           <Text color="#7FDBFF">TRADES</Text>
-        </Box>
-      </Box>
-      <Box>
-        <Box flexDirection="column" width="34%" marginRight={3}>
-          <Text color={MUTED_COLOR}>{getOrderbookHeaderRow()}</Text>
-          {rows.asks.map((row, index) => (
-            <Text
-              key={buildOrderBookRowKey('ask', index)}
-              color={row ? SELL_COLOR : MUTED_COLOR}
-            >
-              {row || ' '}
-            </Text>
-          ))}
-        </Box>
-        <Box flexDirection="column" width="34%" marginRight={3}>
-          <Text color={MUTED_COLOR}>{getOrderbookHeaderRow()}</Text>
-          {rows.bids.map((row, index) => (
-            <Text
-              key={buildOrderBookRowKey('bid', index)}
-              color={row ? BUY_COLOR : MUTED_COLOR}
-            >
-              {row || ' '}
-            </Text>
-          ))}
-        </Box>
-        <Box flexDirection="column" width="29%">
           <Text color={MUTED_COLOR}>{getTradesHeaderRow()}</Text>
           {tradeRows.map((row, index) => (
             <Text
               key={buildTradeRowKey(index)}
               color={
-                row.value ? (row.isBuy ? BUY_COLOR : SELL_COLOR) : MUTED_COLOR
+                row.value
+                  ? areTradesBlinking
+                    ? row.isBuy
+                      ? '#8FF7CA'
+                      : '#FF9A9A'
+                    : row.isBuy
+                      ? BUY_COLOR
+                      : SELL_COLOR
+                  : MUTED_COLOR
               }
+              bold={Boolean(row.value) && areTradesBlinking}
             >
               {row.value || ' '}
             </Text>
           ))}
         </Box>
       </Box>
-      <Text color={MUTED_COLOR}>
-        {statusSegments.map((segment) => (
-          <Text
-            key={segment.key}
-            color={segment.color}
-            dimColor={segment.dimColor}
-            bold={segment.bold}
-          >
-            {segment.text}
-          </Text>
-        ))}
-      </Text>
       {errorMessage ? <Text color={SELL_COLOR}>{errorMessage}</Text> : null}
     </Box>
   );
@@ -197,22 +300,18 @@ export function getOrderbookStatusSegments(
     }));
   }
 
-  const shimmerPosition =
-    Math.abs(frameIndex) %
-    (text.length + ORDERBOOK_STATUS_SHIMMER_COLORS.length);
-  const highlightIndex = Math.floor(ORDERBOOK_STATUS_SHIMMER_COLORS.length / 2);
+  const breathingDot = getLiveStatusDotSegment(frameIndex);
 
-  return text.split('').map((character, index) => {
-    const color = getStatusShimmerColor(index, shimmerPosition);
-
-    return {
-      key: `orderbook-status-${index}`,
-      text: character,
-      color,
-      dimColor: color === undefined,
-      bold: shimmerPosition - index === highlightIndex,
-    };
-  });
+  return [
+    {
+      key: 'orderbook-status-live',
+      text,
+      color: BUY_COLOR,
+      dimColor: false,
+      bold: false,
+    },
+    breathingDot,
+  ];
 }
 
 export function buildOrderBookColumns(
@@ -248,6 +347,49 @@ export function buildOrderBookColumns(
   };
 }
 
+export function buildOrderBookDisplayRows(
+  orderbook: {
+    orderSellList?: OrderBookLevel[];
+    orderBuyList?: OrderBookLevel[];
+  } | null,
+  depth: number,
+) {
+  if (!orderbook) {
+    return {
+      asks: padOrderBookDisplayRows(
+        [{ text: 'Waiting for asks...', heatWidth: 0 }],
+        depth,
+        'end',
+      ),
+      bids: padOrderBookDisplayRows(
+        [{ text: 'Waiting for bids...', heatWidth: 0 }],
+        depth,
+        'start',
+      ),
+    };
+  }
+
+  const visibleAsks = [...(orderbook.orderSellList ?? [])].slice(0, depth);
+  const visibleBids = [...(orderbook.orderBuyList ?? [])].slice(0, depth);
+  const maxAskQty = getMaxOrderBookQuantity(visibleAsks);
+  const maxBidQty = getMaxOrderBookQuantity(visibleBids);
+
+  return {
+    asks: padOrderBookDisplayRows(
+      visibleAsks
+        .reverse()
+        .map((item) => buildOrderBookDisplayRow(item, maxAskQty)),
+      depth,
+      'end',
+    ),
+    bids: padOrderBookDisplayRows(
+      visibleBids.map((item) => buildOrderBookDisplayRow(item, maxBidQty)),
+      depth,
+      'start',
+    ),
+  };
+}
+
 export function buildOrderBookRowKey(side: 'ask' | 'bid', index: number) {
   return `${side}-${index}`;
 }
@@ -260,6 +402,119 @@ export function getTradesHeaderRow() {
   return `${padRight('TIME', 10)}${padRight('PRICE', 9)}SIZE`;
 }
 
+export function calculateOrderBookHeatWidth(
+  quantity: string | number,
+  maxQuantity: number,
+  rowWidth: number,
+) {
+  const numericQuantity = Number(quantity);
+  if (
+    !Number.isFinite(numericQuantity) ||
+    numericQuantity <= 0 ||
+    !Number.isFinite(maxQuantity) ||
+    maxQuantity <= 0
+  ) {
+    return 0;
+  }
+
+  return Math.max(1, Math.ceil((numericQuantity / maxQuantity) * rowWidth));
+}
+
+export function createEmptyBlinkFrames(): BlinkFrames {
+  return {
+    mid: 0,
+    stats: 0,
+    asks: 0,
+    bids: 0,
+    trades: 0,
+  };
+}
+
+export function buildOrderbookBlinkSignatures(input: {
+  latestPrice: string;
+  priceChange1h?: number;
+  priceChange24h?: number;
+  volume24h?: number;
+  orderbook: {
+    orderSellList?: OrderBookLevel[];
+    orderBuyList?: OrderBookLevel[];
+  } | null;
+  trades: TradeItem[];
+}): BlinkSignatures {
+  return {
+    mid: input.latestPrice,
+    stats: [
+      input.priceChange1h ?? '',
+      input.priceChange24h ?? '',
+      input.volume24h ?? '',
+    ].join('|'),
+    asks: (input.orderbook?.orderSellList ?? [])
+      .map((level) => `${level.price}:${level.qty}:${level.value}`)
+      .join('|'),
+    bids: (input.orderbook?.orderBuyList ?? [])
+      .map((level) => `${level.price}:${level.qty}:${level.value}`)
+      .join('|'),
+    trades: input.trades
+      .map((trade) =>
+        [
+          trade.id ?? '',
+          trade.price,
+          trade.qty,
+          trade.filledQty,
+          trade.amount,
+          trade.size,
+          trade.filledDirection,
+          trade.isLong,
+          trade.createdAt,
+          trade.time,
+        ].join(':'),
+      )
+      .join('|'),
+  };
+}
+
+export function mergeBlinkFramesForChangedSections(
+  current: BlinkFrames,
+  previous: BlinkSignatures,
+  next: BlinkSignatures,
+): BlinkFrames {
+  return {
+    mid: shouldBlinkSection(previous.mid, next.mid)
+      ? ORDERBOOK_DATA_BLINK_TOTAL_FRAMES
+      : current.mid,
+    stats: shouldBlinkSection(previous.stats, next.stats)
+      ? ORDERBOOK_DATA_BLINK_TOTAL_FRAMES
+      : current.stats,
+    asks: shouldBlinkSection(previous.asks, next.asks)
+      ? ORDERBOOK_DATA_BLINK_TOTAL_FRAMES
+      : current.asks,
+    bids: shouldBlinkSection(previous.bids, next.bids)
+      ? ORDERBOOK_DATA_BLINK_TOTAL_FRAMES
+      : current.bids,
+    trades: shouldBlinkSection(previous.trades, next.trades)
+      ? ORDERBOOK_DATA_BLINK_TOTAL_FRAMES
+      : current.trades,
+  };
+}
+
+export function decayBlinkFrames(input: BlinkFrames): BlinkFrames {
+  return {
+    mid: Math.max(0, input.mid - 1),
+    stats: Math.max(0, input.stats - 1),
+    asks: Math.max(0, input.asks - 1),
+    bids: Math.max(0, input.bids - 1),
+    trades: Math.max(0, input.trades - 1),
+  };
+}
+
+export function hasActiveBlinkFrames(input: BlinkFrames) {
+  return Object.values(input).some((value) => value > 0);
+}
+
+export function isBlinkVisible(remainingFrames: number) {
+  return remainingFrames > 0 && remainingFrames % 2 === 0;
+}
+
 function padRows(rows: string[], depth: number, align: 'start' | 'end') {
   if (rows.length >= depth) {
     return rows.slice(0, depth);
@@ -269,11 +524,38 @@ function padRows(rows: string[], depth: number, align: 'start' | 'end') {
   return align === 'end' ? [...blanks, ...rows] : [...rows, ...blanks];
 }
 
+function padOrderBookDisplayRows(
+  rows: OrderBookDisplayRow[],
+  depth: number,
+  align: 'start' | 'end',
+) {
+  if (rows.length >= depth) {
+    return rows.slice(0, depth);
+  }
+
+  const blanks = Array.from({ length: depth - rows.length }, () => ({
+    text: '',
+    heatWidth: 0,
+  }));
+  return align === 'end' ? [...blanks, ...rows] : [...rows, ...blanks];
+}
+
 function formatOrderBookRow(item: OrderBookLevel) {
   return `${padRight(formatCompactDecimal(item.price, 2), 11)}${padRight(
     formatCompactDecimal(item.qty, 3),
     10,
   )}${formatCompactDecimal(item.value, 2)}`;
+}
+
+function buildOrderBookDisplayRow(
+  item: OrderBookLevel,
+  maxQuantity: number,
+): OrderBookDisplayRow {
+  const text = formatOrderBookRow(item);
+  return {
+    text,
+    heatWidth: calculateOrderBookHeatWidth(item.qty, maxQuantity, text.length),
+  };
 }
 
 export function buildTradeRows(trades: TradeItem[], depth: number) {
@@ -323,6 +605,51 @@ function formatTradeRow(trade: TradeItem) {
   )}${formatCompactDecimal(resolveTradeSize(trade), 3)}`;
 }
 
+function shouldBlinkSection(previous: string, next: string) {
+  return previous.length > 0 && next.length > 0 && previous !== next;
+}
+
+function getMaxOrderBookQuantity(levels: OrderBookLevel[]) {
+  return levels.reduce((max, level) => {
+    const quantity = Number(level.qty);
+    if (!Number.isFinite(quantity)) {
+      return max;
+    }
+
+    return Math.max(max, quantity);
+  }, 0);
+}
+
+function renderOrderBookHeatRow(input: {
+  row: OrderBookDisplayRow;
+  color: string;
+  backgroundColor: string;
+  bold: boolean;
+}) {
+  if (!input.row.text) {
+    return <Text color={MUTED_COLOR}> </Text>;
+  }
+
+  const heatWidth = Math.min(input.row.heatWidth, input.row.text.length);
+  const leading = input.row.text.slice(0, heatWidth);
+  const trailing = input.row.text.slice(heatWidth);
+
+  return (
+    <>
+      {leading ? (
+        <Text
+          backgroundColor={input.backgroundColor}
+          color={input.color}
+          bold={input.bold}
+        >
+          {leading}
+        </Text>
+      ) : null}
+      {trailing ? <Text color={input.color}>{trailing}</Text> : null}
+    </>
+  );
+}
+
 function resolveTradeSize(trade: TradeItem): string | number {
   return trade.qty ?? trade.filledQty ?? trade.amount ?? trade.size ?? '';
 }
@@ -332,22 +659,17 @@ function formatTradeTime(trade: TradeItem) {
   if (Number.isFinite(numericTime)) {
     const timestamp =
       numericTime > 1_000_000_000_000 ? numericTime : numericTime * 1000;
-    return formatTimestampUtc(timestamp);
+    return formatLocalTimeOfDayWithSeconds(timestamp);
   }
 
   if (trade.createdAt) {
     const parsed = Date.parse(trade.createdAt);
     if (Number.isFinite(parsed)) {
-      return formatTimestampUtc(parsed);
+      return formatLocalTimeOfDayWithSeconds(parsed);
     }
   }
 
   return '--:--:--';
-}
-
-function formatTimestampUtc(timestamp: number) {
-  const date = new Date(timestamp);
-  return `${String(date.getUTCHours()).padStart(2, '0')}:${String(date.getUTCMinutes()).padStart(2, '0')}:${String(date.getUTCSeconds()).padStart(2, '0')}`;
 }
 
 export function formatPercentChange(value?: number) {
@@ -380,16 +702,36 @@ export function formatVolume(value?: number) {
   return (value as number).toFixed(2);
 }
 
-function getStatusShimmerColor(
-  index: number,
-  shimmerPosition: number,
-): string | undefined {
-  const colorIndex = shimmerPosition - index;
-  if (colorIndex < 0 || colorIndex >= ORDERBOOK_STATUS_SHIMMER_COLORS.length) {
-    return undefined;
+export function getLiveStatusDotSegment(frameIndex: number): StatusSegment {
+  const phase = Math.abs(frameIndex) % 6;
+
+  if (phase <= 1) {
+    return {
+      key: 'orderbook-status-dot',
+      text: ' ●',
+      color: '#1E9F6E',
+      dimColor: false,
+      bold: false,
+    };
   }
 
-  return ORDERBOOK_STATUS_SHIMMER_COLORS[colorIndex];
+  if (phase <= 3) {
+    return {
+      key: 'orderbook-status-dot',
+      text: ' ●',
+      color: '#28DE9C',
+      dimColor: false,
+      bold: true,
+    };
+  }
+
+  return {
+    key: 'orderbook-status-dot',
+    text: ' ●',
+    color: '#0F5C41',
+    dimColor: false,
+    bold: false,
+  };
 }
 
 function formatCompactDecimal(value: string | number, digits: number) {

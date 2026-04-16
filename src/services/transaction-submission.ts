@@ -4,7 +4,7 @@ import type { NetworkConfig } from '../config/networks';
 import { logNetworkRequest, logNetworkResponse } from './logger';
 
 const TRANSACTION_RECEIPT_CONFIRMATIONS = 1;
-const TRANSACTION_RECEIPT_TIMEOUT_MS = 15_000;
+const TRANSACTION_RECEIPT_TIMEOUT_MS = 60_000;
 const TRANSACTION_SUBMISSION_RPC_METHOD = 'eth_sendRawTransaction';
 
 export type TransactionSubmissionResult = {

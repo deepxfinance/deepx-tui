@@ -92,6 +92,27 @@ export function formatLocalTimeOfDay(
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
+export function formatLocalTimeOfDayWithSeconds(
+  timestamp: number | string | undefined,
+  timeZone = getUserTimeZone(),
+): string {
+  if (timestamp == null) {
+    return '--:--:--';
+  }
+
+  const normalizedTimestamp =
+    typeof timestamp === 'number'
+      ? normalizeUnixTimestamp(timestamp)
+      : timestamp;
+  const date = new Date(normalizedTimestamp);
+  if (Number.isNaN(date.getTime())) {
+    return '--:--:--';
+  }
+
+  const { hour, minute, second } = resolveTimeParts(date, timeZone, true);
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}`;
+}
+
 function fallbackTimeLabel(resolution: string): string {
   return resolution === '1D' || resolution === '1W' || resolution === '1M'
     ? '-- --'
@@ -161,17 +182,20 @@ function resolveDateParts(
 function resolveTimeParts(
   date: Date,
   timeZone: string,
-): { hour: number; minute: number } {
+  includeSeconds = false,
+): { hour: number; minute: number; second: number } {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone,
     hour: '2-digit',
     minute: '2-digit',
+    ...(includeSeconds ? { second: '2-digit' as const } : {}),
     hour12: false,
   }).formatToParts(date);
 
   return {
     hour: Number(findPart(parts, 'hour')),
     minute: Number(findPart(parts, 'minute')),
+    second: Number(findPart(parts, 'second')),
   };
 }
 
@@ -183,7 +207,8 @@ function findPart(
     | 'month'
     | 'day'
     | 'hour'
-    | 'minute',
+    | 'minute'
+    | 'second',
 ): string {
   return parts.find((part) => part.type === type)?.value ?? '0';
 }

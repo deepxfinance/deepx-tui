@@ -227,6 +227,17 @@ export function getInitialOutputView(_mode: 'default' | 'debug'): OutputView {
   return { kind: 'empty' };
 }
 
+export function getTranscriptMessageSpacing(
+  previousRole?: ChatMessage['role'],
+  currentRole?: ChatMessage['role'],
+) {
+  if (previousRole === 'user' && currentRole === 'assistant') {
+    return 1;
+  }
+
+  return 0;
+}
+
 export const DashboardScreen: FC<DashboardScreenProps> = ({
   mode,
   network,
@@ -839,43 +850,59 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
 
       {visibleChatMessages.length > 0 || isChatLoading ? (
         <TranscriptSection>
-          {visibleChatMessages.map((message) => (
-            <Text
+          {visibleChatMessages.map((message, index) => (
+            <Box
               key={message.id}
-              color={
-                message.role === 'assistant'
-                  ? CHAT_ASSISTANT_COLOR
-                  : message.role === 'command'
-                    ? COMMAND_TEXT_COLOR
-                    : CHAT_USER_COLOR
-              }
+              flexDirection="column"
+              marginTop={getTranscriptMessageSpacing(
+                visibleChatMessages[index - 1]?.role,
+                message.role,
+              )}
             >
-              {message.role === 'assistant'
-                ? 'AI> '
-                : message.role === 'command'
-                  ? ''
-                  : 'You> '}
-              {message.role === 'command'
-                ? renderCommandMessage(message.content)
-                : message.role === 'assistant'
-                  ? renderAssistantMessage(message.content)
-                  : message.content}
-            </Text>
+              <Text
+                color={
+                  message.role === 'assistant'
+                    ? CHAT_ASSISTANT_COLOR
+                    : message.role === 'command'
+                      ? COMMAND_TEXT_COLOR
+                      : CHAT_USER_COLOR
+                }
+              >
+                {message.role === 'assistant'
+                  ? 'AI> '
+                  : message.role === 'command'
+                    ? ''
+                    : 'You> '}
+                {message.role === 'command'
+                  ? renderCommandMessage(message.content)
+                  : message.role === 'assistant'
+                    ? renderAssistantMessage(message.content)
+                    : message.content}
+              </Text>
+            </Box>
           ))}
           {isChatLoading ? (
-            <Text color={CHAT_ASSISTANT_COLOR}>
-              AI&gt;{' '}
-              {getChatLoadingSegments(chatLoadingFrame).map((segment) => (
-                <Text
-                  key={segment.key}
-                  color={segment.color}
-                  dimColor={segment.dimColor}
-                  bold={segment.bold}
-                >
-                  {segment.text}
-                </Text>
-              ))}
-            </Text>
+            <Box
+              flexDirection="column"
+              marginTop={getTranscriptMessageSpacing(
+                visibleChatMessages[visibleChatMessages.length - 1]?.role,
+                'assistant',
+              )}
+            >
+              <Text color={CHAT_ASSISTANT_COLOR}>
+                AI&gt;{' '}
+                {getChatLoadingSegments(chatLoadingFrame).map((segment) => (
+                  <Text
+                    key={segment.key}
+                    color={segment.color}
+                    dimColor={segment.dimColor}
+                    bold={segment.bold}
+                  >
+                    {segment.text}
+                  </Text>
+                ))}
+              </Text>
+            </Box>
           ) : null}
         </TranscriptSection>
       ) : null}
@@ -1122,21 +1149,42 @@ type TransactionConfirmationSelectorProps = {
   selectedIndex: number;
 };
 
+function getConfirmationActionColors(
+  action: TransactionConfirmationAction,
+  isSelected: boolean,
+) {
+  if (action === 'confirm') {
+    return isSelected
+      ? { color: 'green', backgroundColor: 'white' as const }
+      : { color: 'black', backgroundColor: 'green' as const };
+  }
+
+  return isSelected
+    ? { color: 'red', backgroundColor: 'white' as const }
+    : { color: 'white', backgroundColor: 'red' as const };
+}
+
 const TransactionConfirmationSelector: FC<
   TransactionConfirmationSelectorProps
 > = ({ items, selectedIndex }) => {
   return (
     <Box flexDirection="column">
       <Box>
-        {items.map((item, index) => (
-          <Text
-            key={item.action}
-            color={index === selectedIndex ? 'black' : 'white'}
-            backgroundColor={index === selectedIndex ? 'yellow' : undefined}
-          >
-            {`${index === selectedIndex ? '>' : ' '} ${item.label}  `}
-          </Text>
-        ))}
+        {items.map((item, index) => {
+          const isSelected = index === selectedIndex;
+          const colors = getConfirmationActionColors(item.action, isSelected);
+
+          return (
+            <Text
+              key={item.action}
+              bold
+              color={colors.color}
+              backgroundColor={colors.backgroundColor}
+            >
+              {` ${isSelected ? '>' : ' '} ${item.label.toUpperCase()} `}
+            </Text>
+          );
+        })}
       </Box>
       <Text color="gray">
         {
@@ -1186,19 +1234,25 @@ const AgentActionPanel: FC<AgentActionPanelProps> = ({
         </Text>
       ))}
       <Box>
-        {TRANSACTION_CONFIRMATION_ITEMS.map((item, index) => (
-          <Text
-            key={item.action}
-            color={index === selectedIndex ? 'black' : 'white'}
-            backgroundColor={index === selectedIndex ? 'yellow' : undefined}
-          >
-            {`${index === selectedIndex ? '>' : ' '} ${
-              item.action === 'confirm'
-                ? action.confirmLabel
-                : action.cancelLabel
-            }  `}
-          </Text>
-        ))}
+        {TRANSACTION_CONFIRMATION_ITEMS.map((item, index) => {
+          const isSelected = index === selectedIndex;
+          const colors = getConfirmationActionColors(item.action, isSelected);
+
+          return (
+            <Text
+              key={item.action}
+              bold
+              color={colors.color}
+              backgroundColor={colors.backgroundColor}
+            >
+              {` ${isSelected ? '>' : ' '} ${
+                item.action === 'confirm'
+                  ? action.confirmLabel.toUpperCase()
+                  : action.cancelLabel.toUpperCase()
+              } `}
+            </Text>
+          );
+        })}
       </Box>
       <Text color="gray">Left/Right move. Enter selects. Esc cancels.</Text>
     </Box>

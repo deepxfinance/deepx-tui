@@ -4,6 +4,7 @@ import { getNetworkConfig } from '../src/config/networks';
 import {
   candleWindowDurationMs,
   DEFAULT_CANDLE_HISTORY_LIMIT,
+  fetchMarketPriceInfo,
   resolutionToTimeFrame,
 } from '../src/services/deepx-api';
 import {
@@ -57,5 +58,41 @@ describe('resolutionToTimeFrame', () => {
     expect(candleWindowDurationMs('15m', DEFAULT_CANDLE_HISTORY_LIMIT)).toBe(
       154 * 15 * 60_000,
     );
+  });
+});
+
+describe('fetchMarketPriceInfo', () => {
+  test('returns latest price and 24h change info for a perp pair', async () => {
+    const result = await fetchMarketPriceInfo({
+      network: getNetworkConfig('devnet'),
+      pair: 'ETH-USDC',
+    });
+
+    expect(result).toEqual({
+      pair: 'ETH-USDC',
+      kind: 'perp',
+      latestPrice: '1925.00',
+      last24hChange: '+25.00',
+      last24hChangePercent: '+1.32%',
+      summary:
+        'ETH-USDC perp market, latest price 1925.00, 24h change +25.00 (+1.32%)',
+    });
+  });
+
+  test('returns latest price and 24h change info for a spot pair', async () => {
+    const result = await fetchMarketPriceInfo({
+      network: getNetworkConfig('devnet'),
+      pair: 'SOL/USDC',
+    });
+
+    expect(result).toEqual({
+      pair: 'SOL/USDC',
+      kind: 'spot',
+      latestPrice: '151.2500',
+      last24hChange: '+1.7500',
+      last24hChangePercent: '+1.17%',
+      summary:
+        'SOL/USDC spot market, latest price 151.2500, 24h change +1.7500 (+1.17%)',
+    });
   });
 });

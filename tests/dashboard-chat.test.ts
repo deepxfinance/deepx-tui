@@ -22,7 +22,23 @@ describe('dashboard chat', () => {
     });
 
     expect(prompt).toContain('already unlocked');
+    expect(prompt).toContain(
+      'Use deepx_get_market_price_info when the user asks for the latest price or last 24h market change for a supported pair.',
+    );
+    expect(prompt).toContain(
+      'DeepX is a high-performance decentralized lending and trading platform for crypto spot and perpetual contracts.',
+    );
+    expect(prompt).toContain('DeepX Chain powers the DeepX DEX.');
+    expect(prompt).toContain(
+      'with both Rust and EVM virtual machines and roughly 200,000 on-chain TPS.',
+    );
+    expect(prompt).toContain(
+      'Each subaccount keeps its own margin balances, orders, positions, and risk parameters',
+    );
     expect(prompt).toContain('status=submitted');
+    expect(prompt).toContain(
+      'Use deepx_get_wallet_portfolio when the user asks about wallet portfolio, balance, collateral, borrowing, positions, or current account exposure.',
+    );
     expect(prompt).toContain('never set confirm=true from AI chat');
     expect(prompt).toContain('chooses Confirm in the below-input selector');
     expect(prompt).toContain(

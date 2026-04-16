@@ -1,9 +1,11 @@
 import type { FunctionDeclaration } from '@google/genai';
 
 import {
+  getNetworkConfig,
   normalizeRuntimeNetwork,
   type RuntimeNetwork,
 } from '../config/networks';
+import { fetchMarketPriceInfo } from './deepx-api';
 import {
   cancelOrderTool,
   closePositionTool,
@@ -13,11 +15,15 @@ import {
   updatePositionTool,
 } from './order-tools';
 import { createSubaccountTool } from './subaccount-tools';
-import { getUserBalanceTool, listUserSubaccountsTool } from './user-balance';
+import {
+  getWalletPortfolioTool,
+  listUserSubaccountsTool,
+} from './user-balance';
 
 export type DeepxAgentToolName =
   | 'deepx_list_markets'
-  | 'deepx_get_user_balance'
+  | 'deepx_get_market_price_info'
+  | 'deepx_get_wallet_portfolio'
   | 'deepx_list_subaccounts'
   | 'deepx_create_subaccount'
   | 'deepx_place_order'
@@ -46,9 +52,27 @@ export const DEEPX_AGENT_TOOL_DECLARATIONS = [
     },
   },
   {
-    name: 'deepx_get_user_balance',
+    name: 'deepx_get_market_price_info',
     description:
-      'Return wallet balance, collateral, borrow totals, and perp exposure for the locally stored wallet on the requested network.',
+      'Return the latest market price plus last 24h price change info for a supported DeepX pair on the requested network.',
+    parametersJsonSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['pair'],
+      properties: {
+        network: {
+          type: 'string',
+          enum: ['deepx_devnet', 'deepx_testnet'],
+          default: 'deepx_devnet',
+        },
+        pair: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'deepx_get_wallet_portfolio',
+    description:
+      'Return wallet portfolio details, including balances, borrowing, and perp positions, for the locally stored wallet on the requested network.',
     parametersJsonSchema: {
       type: 'object',
       additionalProperties: false,
@@ -223,14 +247,18 @@ export async function executeDeepxAgentTool(
   options: {
     allowLiveExecution?: boolean;
     defaultNetwork?: RuntimeNetwork;
-    getUserBalance?: typeof getUserBalanceTool;
+    getMarketPriceInfo?: typeof fetchMarketPriceInfo;
+    getWalletPortfolio?: typeof getWalletPortfolioTool;
     listUserSubaccounts?: typeof listUserSubaccountsTool;
     createSubaccount?: typeof createSubaccountTool;
   } = {},
 ) {
   const allowLiveExecution = options.allowLiveExecution ?? false;
   const toolNetwork = resolveToolNetwork(args.network, options.defaultNetwork);
-  const userBalanceTool = options.getUserBalance ?? getUserBalanceTool;
+  const marketPriceInfoTool =
+    options.getMarketPriceInfo ?? fetchMarketPriceInfo;
+  const walletPortfolioTool =
+    options.getWalletPortfolio ?? getWalletPortfolioTool;
   const userSubaccountsTool =
     options.listUserSubaccounts ?? listUserSubaccountsTool;
   const createSubaccount = options.createSubaccount ?? createSubaccountTool;
@@ -241,8 +269,13 @@ export async function executeDeepxAgentTool(
         network: toolNetwork,
         markets: await listSupportedMarkets(toolNetwork),
       };
-    case 'deepx_get_user_balance':
-      return await userBalanceTool({
+    case 'deepx_get_market_price_info':
+      return await marketPriceInfoTool({
+        network: getNetworkConfig(toolNetwork),
+        pair: String(args.pair ?? ''),
+      });
+    case 'deepx_get_wallet_portfolio':
+      return await walletPortfolioTool({
         network: toolNetwork,
       });
     case 'deepx_list_subaccounts':

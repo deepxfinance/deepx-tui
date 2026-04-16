@@ -32,7 +32,8 @@ Set `GEMINI_API_KEY` or `GOOGLE_API_KEY` before launch if you want live AI chat 
 - the passphrase stays in process memory for the current session so later live order actions can reuse it
 - the AI chat panel uses the Google GenAI SDK with `gemini-3-flash-preview`
 - the chat agent can call the built-in DeepX tools directly for market lookup and order workflows
-- the chat agent can read the current local wallet balance, collateral, borrow totals, and perp exposure through a read-only balance tool
+- the chat agent can fetch market price info for supported pairs, including latest price and 24h change
+- the chat agent can read the current local wallet portfolio, including balances, borrowing, and perp positions, through a read-only portfolio tool
 - the chat agent can list all Subaccount contract subaccounts attached to the local wallet
 - the chat agent can prepare a new Subaccount contract creation request; live creation pauses for the below-input confirmation selector
 - the agent tool layer also exposes perp position-close and take-profit/stop-loss update actions
@@ -44,6 +45,7 @@ Set `GEMINI_API_KEY` or `GOOGLE_API_KEY` before launch if you want live AI chat 
 - if a live transaction submission fails, the assistant error now includes the RPC URL, request body, tx hash when available, and any RPC error body to speed up debugging
 - debug mode increases logger capture for HTTP/WebSocket request and response activity
 - debug mode also writes captured logs to `~/.local/state/deepx/logs/debug.log`; set `DEEPX_DEBUG_LOG_FILE` if you want a different file
+- debug mode does not open a dedicated in-app debug panel; logs stay in the local file instead
 - the dashboard shows open perp positions for the unlocked wallet in a dedicated lower panel
 - the `/orderbook` workspace now shows the live ladder, latest trades, and compact 1h/24h price and volume stats in the header
 - no MCP server is required for the dashboard chat flow

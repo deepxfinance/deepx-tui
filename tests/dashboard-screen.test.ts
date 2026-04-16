@@ -5,6 +5,7 @@ import {
   getCommandMessageSegments,
   getDashboardLayoutSlots,
   getInitialOutputView,
+  getTranscriptMessageSpacing,
   getWelcomeLogoFrames,
   getWorkspaceHeight,
   WELCOME_LOGO_LINES,
@@ -152,11 +153,20 @@ describe('dashboard welcome logo', () => {
     expect(buildHelpLines('deepx')).toContain(
       '- /candle: open the live candle chart for a selected pair',
     );
+    expect(buildHelpLines('deepx')).toContain(
+      '- optional debug mode writes expanded logs to a local debug file',
+    );
   });
 
   test('starts with an empty workspace in both modes', () => {
     expect(getInitialOutputView('debug')).toEqual({ kind: 'empty' });
     expect(getInitialOutputView('default')).toEqual({ kind: 'empty' });
+  });
+
+  test('adds a blank line between user and assistant transcript messages', () => {
+    expect(getTranscriptMessageSpacing('user', 'assistant')).toBe(1);
+    expect(getTranscriptMessageSpacing('assistant', 'user')).toBe(0);
+    expect(getTranscriptMessageSpacing('assistant', 'assistant')).toBe(0);
   });
 
   test('renders the slash-command selector below the input bar', () => {

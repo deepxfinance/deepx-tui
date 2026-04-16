@@ -568,7 +568,7 @@ type RawPerpPosition = {
   entry_price: bigint;
 };
 
-type UserBalanceContracts = {
+type WalletPortfolioContracts = {
   userStats(user: string): Promise<UserStats>;
   subaccountInfo(account: string): Promise<UserSubaccountInfo>;
   getOraclePriceAll(): Promise<OraclePrice[]>;
@@ -583,12 +583,12 @@ type UserBalanceContracts = {
   assetPools(lendingMarketId: number): Promise<AssetPoolState[]>;
 };
 
-type UserBalanceDependencies = {
+type WalletPortfolioDependencies = {
   readWalletRecord?: typeof readWalletRecord;
-  createContracts?: (network: RuntimeNetwork) => UserBalanceContracts;
+  createContracts?: (network: RuntimeNetwork) => WalletPortfolioContracts;
 };
 
-export type UserBalanceAsset = {
+export type WalletPortfolioAsset = {
   symbol: string;
   name: string;
   address: string;
@@ -605,7 +605,18 @@ export type UserBalanceAsset = {
   borrowInterestUsd: string;
 };
 
-export type UserBalanceToolResult =
+export type WalletPortfolioPosition = {
+  marketId: number;
+  pair: string;
+  side: 'LONG' | 'SHORT';
+  size: string;
+  entryPrice: string;
+  markPrice: string;
+  unrealizedPnl: string;
+  unrealizedPnlDisplay: string;
+};
+
+export type WalletPortfolioToolResult =
   | {
       status: 'unavailable';
       network: RuntimeNetwork;
@@ -630,7 +641,8 @@ export type UserBalanceToolResult =
       totalCollateral: string;
       totalMarginRequired: string;
       totalMaintenanceMarginRequired: string;
-      assets: UserBalanceAsset[];
+      assets: WalletPortfolioAsset[];
+      positions: WalletPortfolioPosition[];
       summary: string;
     };
 
@@ -703,12 +715,12 @@ const NETWORK_BALANCE_TOKENS: Record<RuntimeNetwork, BalanceToken[]> = {
   ],
 };
 
-export async function getUserBalanceTool(
+export async function getWalletPortfolioTool(
   input: {
     network?: RuntimeNetwork;
   } = {},
-  dependencies: UserBalanceDependencies = {},
-): Promise<UserBalanceToolResult> {
+  dependencies: WalletPortfolioDependencies = {},
+): Promise<WalletPortfolioToolResult> {
   const network = input.network ?? 'deepx_devnet';
   const loadWalletRecord = dependencies.readWalletRecord ?? readWalletRecord;
   const walletRecord = await loadWalletRecord(network);
@@ -723,7 +735,7 @@ export async function getUserBalanceTool(
 
   const contracts =
     dependencies.createContracts?.(network) ??
-    createUserBalanceContracts(network);
+    createWalletPortfolioContracts(network);
   const subaccountAddress = await getPrimarySubaccountAddress(
     walletRecord.address,
     contracts,
@@ -737,7 +749,7 @@ export async function getUserBalanceTool(
     };
   }
 
-  return fetchUserBalance({
+  return fetchWalletPortfolio({
     network,
     walletAddress: walletRecord.address,
     subaccountAddress,
@@ -749,7 +761,7 @@ export async function listUserSubaccountsTool(
   input: {
     network?: RuntimeNetwork;
   } = {},
-  dependencies: UserBalanceDependencies = {},
+  dependencies: WalletPortfolioDependencies = {},
 ): Promise<UserSubaccountsToolResult> {
   const network = input.network ?? 'deepx_devnet';
   const loadWalletRecord = dependencies.readWalletRecord ?? readWalletRecord;
@@ -765,7 +777,7 @@ export async function listUserSubaccountsTool(
 
   const contracts =
     dependencies.createContracts?.(network) ??
-    createUserBalanceContracts(network);
+    createWalletPortfolioContracts(network);
   const stats = await contracts.userStats(walletRecord.address);
   const subaccounts = stats.subaccounts.map((subaccount, index) => ({
     address: subaccount.subaccount,
@@ -796,18 +808,18 @@ export async function listUserSubaccountsTool(
 
 async function getPrimarySubaccountAddress(
   walletAddress: string,
-  contracts: UserBalanceContracts,
+  contracts: WalletPortfolioContracts,
 ) {
   const stats = await contracts.userStats(walletAddress);
   return stats.subaccounts[0]?.subaccount;
 }
 
-export async function fetchUserBalance(input: {
+export async function fetchWalletPortfolio(input: {
   network: RuntimeNetwork;
   walletAddress: string;
   subaccountAddress: string;
-  contracts: UserBalanceContracts;
-}): Promise<Extract<UserBalanceToolResult, { status: 'success' }>> {
+  contracts: WalletPortfolioContracts;
+}): Promise<Extract<WalletPortfolioToolResult, { status: 'success' }>> {
   const balanceTokens = NETWORK_BALANCE_TOKENS[input.network];
   const perpMarkets = (await getNetworkMarkets(getNetworkConfig(input.network)))
     .filter((pair) => pair.kind === 'perp')
@@ -914,27 +926,45 @@ export async function fetchUserBalance(input: {
     (sum, asset) => sum + asset._balanceBorrowedUsdRaw,
     0n,
   );
-  const totalUnrealizedPnlRaw = positions.reduce((sum, position) => {
-    const currentPriceRaw =
-      oraclePriceBySymbol.get(marketSymbolFor(position.market_id)) ?? 0n;
-    const market = perpMarkets.find(
-      (candidate) => candidate.marketId === position.market_id,
-    );
-    if (!market) {
-      return sum;
-    }
+  const summarizedPositions = positions
+    .map((position) => {
+      const pair = marketPairFor(position.market_id);
+      const currentPriceRaw =
+        oraclePriceBySymbol.get(marketSymbolFor(position.market_id)) ?? 0n;
+      const market = perpMarkets.find(
+        (candidate) => candidate.marketId === position.market_id,
+      );
+      if (!market || !pair || position.base_asset_amount === 0n) {
+        return null;
+      }
 
-    let pnlRaw = multiplyAmountByPriceDifference(
-      position.base_asset_amount,
-      market.baseDecimals,
-      currentPriceRaw - position.entry_price,
-    );
-    if (!position.is_long) {
-      pnlRaw *= -1n;
-    }
+      let pnlRaw = multiplyAmountByPriceDifference(
+        position.base_asset_amount,
+        market.baseDecimals,
+        currentPriceRaw - position.entry_price,
+      );
+      if (!position.is_long) {
+        pnlRaw *= -1n;
+      }
 
-    return sum + pnlRaw;
-  }, 0n);
+      return {
+        marketId: position.market_id,
+        pair,
+        side: position.is_long ? 'LONG' : 'SHORT',
+        size: formatUnits(position.base_asset_amount, market.baseDecimals),
+        entryPrice: formatUnits(position.entry_price, USD_DECIMALS),
+        markPrice: formatUnits(currentPriceRaw, USD_DECIMALS),
+        unrealizedPnl: formatUnits(pnlRaw, USD_DECIMALS),
+        unrealizedPnlDisplay: formatUsdDisplay(pnlRaw),
+        _unrealizedPnlRaw: pnlRaw,
+      };
+    })
+    .filter((position) => position !== null);
+
+  const totalUnrealizedPnlRaw = summarizedPositions.reduce(
+    (sum, position) => sum + position._unrealizedPnlRaw,
+    0n,
+  );
 
   const totalValueRaw =
     totalUnrealizedPnlRaw + totalDepositsRaw - totalBorrowedRaw;
@@ -954,6 +984,9 @@ export async function fetchUserBalance(input: {
       _balanceUsdRaw: _ignored,
       ...asset
     }) => asset,
+  );
+  const cleanPositions = summarizedPositions.map(
+    ({ _unrealizedPnlRaw: _ignored, ...position }) => position,
   );
 
   return {
@@ -982,7 +1015,8 @@ export async function fetchUserBalance(input: {
     ),
     marginRatio,
     assets: summarizedAssets,
-    summary: buildBalanceSummary({
+    positions: cleanPositions,
+    summary: buildWalletPortfolioSummary({
       network: input.network,
       walletAddress: input.walletAddress,
       totalValueRaw,
@@ -995,9 +1029,9 @@ export async function fetchUserBalance(input: {
   };
 }
 
-function createUserBalanceContracts(
+function createWalletPortfolioContracts(
   network: RuntimeNetwork,
-): UserBalanceContracts {
+): WalletPortfolioContracts {
   const provider = createRpcProvider(getNetworkConfig(network));
   const subaccountContract = new Contract(
     SUBACCOUNT_CONTRACT_ADDRESS,
@@ -1120,7 +1154,7 @@ function addThousandsSeparators(value: string) {
   return decimalPart ? `${grouped}.${decimalPart}` : grouped;
 }
 
-function buildBalanceSummary(input: {
+function buildWalletPortfolioSummary(input: {
   network: RuntimeNetwork;
   walletAddress: string;
   totalValueRaw: bigint;
@@ -1136,12 +1170,12 @@ function buildBalanceSummary(input: {
       : `margin ratio ${input.marginRatio}`;
 
   return [
-    `${input.network} balance for ${input.walletAddress}:`,
+    `${input.network} wallet portfolio for ${input.walletAddress}:`,
     `total value ${formatUsdDisplay(input.totalValueRaw)}`,
     `net value ${formatUsdDisplay(input.netValueRaw)}`,
     `deposits ${formatUsdDisplay(input.totalDepositsRaw)}`,
     `borrowed ${formatUsdDisplay(input.totalBorrowedRaw)}`,
-    `unrealized PnL ${formatUsdDisplay(input.totalUnrealizedPnlRaw)}`,
+    `positions unrealized PnL ${formatUsdDisplay(input.totalUnrealizedPnlRaw)}`,
     marginLabel,
   ].join(', ');
 }
@@ -1181,3 +1215,17 @@ function marketSymbolFor(marketId: number) {
       return '';
   }
 }
+
+function marketPairFor(marketId: number) {
+  switch (marketId) {
+    case 3:
+      return 'ETH-USDC';
+    case 4:
+      return 'SOL-USDC';
+    default:
+      return '';
+  }
+}
+
+export const getUserBalanceTool = getWalletPortfolioTool;
+export const fetchUserBalance = fetchWalletPortfolio;

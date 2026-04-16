@@ -11,7 +11,7 @@ export function buildHelpLines(commandName: string): string[] {
     '',
     'Phase 1 behavior:',
     '- defaults to devnet',
-    '- optional debug mode shows a live internal log panel',
+    '- optional debug mode writes expanded logs to a local debug file',
     '- checks for a local encrypted wallet',
     '- prompts for passphrase if a wallet already exists',
     '- prompts for a simple private key import if missing',

@@ -127,6 +127,66 @@ export function installMockMarketApi() {
         );
       }
 
+      if (url.pathname === '/v2/market/perp/candles') {
+        return new Response(
+          JSON.stringify({
+            code: 200,
+            msg: 'success',
+            data: {
+              details: [
+                {
+                  time: 1713312000000,
+                  open: '1900',
+                  high: '1925',
+                  low: '1895',
+                  close: '1925',
+                  volume: '120',
+                },
+                {
+                  time: 1713225600000,
+                  open: '1900',
+                  high: '1910',
+                  low: '1890',
+                  close: '1900',
+                  volume: '100',
+                },
+              ],
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+
+      if (url.pathname === '/v2/market/spot/candles') {
+        return new Response(
+          JSON.stringify({
+            code: 200,
+            msg: 'success',
+            data: {
+              details: [
+                {
+                  time: 1713312000000,
+                  open: '149.5',
+                  high: '151.25',
+                  low: '149.25',
+                  close: '151.25',
+                  volume: '1400',
+                },
+                {
+                  time: 1713225600000,
+                  open: '149.5',
+                  high: '150.0',
+                  low: '149.0',
+                  close: '149.5',
+                  volume: '1000',
+                },
+              ],
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+
       return new Response(`Unhandled fetch in test: ${url.toString()}`, {
         status: 500,
       });

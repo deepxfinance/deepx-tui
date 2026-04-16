@@ -17,7 +17,69 @@ import { decryptPrivateKey, readWalletRecord } from './wallet-store';
 
 const PERP_CONTRACT_ADDRESS = '0x000000000000000000000000000000000000044E';
 const PERP_ABI = [
-  'function placePerpOrder(address subaccount,uint256 marketId,bool isLong,uint256 size,uint256 price,uint8 orderType,uint16 leverage,uint256 takeProfit,uint256 stopLoss,bool reduceOnly,uint8 postOnly)',
+  {
+    inputs: [
+      {
+        internalType: 'address',
+        name: 'subaccount',
+        type: 'address',
+      },
+      {
+        internalType: 'uint16',
+        name: 'market_id',
+        type: 'uint16',
+      },
+      {
+        internalType: 'bool',
+        name: 'is_long',
+        type: 'bool',
+      },
+      {
+        internalType: 'uint128',
+        name: 'size',
+        type: 'uint128',
+      },
+      {
+        internalType: 'uint128',
+        name: 'price',
+        type: 'uint128',
+      },
+      {
+        internalType: 'uint8',
+        name: 'order_type',
+        type: 'uint8',
+      },
+      {
+        internalType: 'uint8',
+        name: 'leverage',
+        type: 'uint8',
+      },
+      {
+        internalType: 'uint128',
+        name: 'take_profit',
+        type: 'uint128',
+      },
+      {
+        internalType: 'uint128',
+        name: 'stop_loss',
+        type: 'uint128',
+      },
+      {
+        internalType: 'bool',
+        name: 'reduce_only',
+        type: 'bool',
+      },
+      {
+        internalType: 'uint8',
+        name: 'post_only',
+        type: 'uint8',
+      },
+    ],
+    name: 'placePerpOrder',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
   'function cancelOrder(address subaccount,uint256 marketId,uint256 orderId)',
   'function closePosition(address subaccount,uint16 marketId,uint128 price,uint64 slippage)',
   'function setProfitAndLossPoint(address subaccount,uint16 marketId,uint128 takeProfitPoint,uint128 stopLossPoint)',

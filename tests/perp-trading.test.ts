@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { Interface } from 'ethers';
 
 import { getNetworkConfig } from '../src/config/networks';
 import {
@@ -126,6 +127,28 @@ describe('perp trading config', () => {
     expect(
       getTransactionSubmissionRpcUrl(getNetworkConfig('deepx_devnet')),
     ).toBe('https://devnet-rpc-new.deepx.fi');
+  });
+
+  test('encodes placePerpOrder with the on-chain selector', () => {
+    const iface = new Interface([
+      'function placePerpOrder(address subaccount,uint16 marketId,bool isLong,uint128 size,uint128 price,uint8 orderType,uint8 leverage,uint128 takeProfit,uint128 stopLoss,bool reduceOnly,uint8 postOnly)',
+    ]);
+
+    const calldata = iface.encodeFunctionData('placePerpOrder', [
+      '0x1111000000000000000000000000000000001111',
+      1,
+      true,
+      1n,
+      2n,
+      0,
+      3,
+      4n,
+      5n,
+      false,
+      0,
+    ]);
+
+    expect(calldata.slice(0, 10)).toBe('0x18ae37ea');
   });
 
   test('formats submitted orders as a readable terminal block', () => {

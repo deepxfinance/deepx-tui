@@ -82,7 +82,8 @@ Direct entrypoint:
 
 - the chat panel uses `@google/genai` with `gemini-3-flash-preview`
 - the agent runs in-process and calls built-in DeepX market and order helpers directly
-- the agent can also read the current local wallet balance, collateral, borrow totals, and perp exposure through a read-only balance tool
+- the agent can fetch market price info for supported pairs, including latest price and 24h change
+- the agent can also read the current local wallet portfolio, including balances, borrowing, and perp positions, through a read-only portfolio tool
 - the agent can list Subaccount contract subaccounts for the local wallet and prepare new subaccount creation requests through `deepx_create_subaccount`
 - trade prompts such as `buy 0.001 ETH` or `sell 2 SOL at 150` go through the AI agent instead of a local parser shortcut
 - confirmed perp orders can be submitted as live transactions when the wallet is already unlocked for the session
