@@ -1,3 +1,4 @@
+import process from 'node:process';
 import { Box, Text } from 'ink';
 import type { FC } from 'react';
 import { useEffect, useState } from 'react';
@@ -9,6 +10,11 @@ import { HelpScreen } from './screens/help-screen';
 import { WalletImportScreen } from './screens/wallet-import-screen';
 import { WalletUnlockScreen } from './screens/wallet-unlock-screen';
 import { clearLogs, logError, logInfo, setLoggerMode } from './services/logger';
+import {
+  acquireSharedMarketWsSession,
+  type MarketWsSession,
+  releaseSharedMarketWsSession,
+} from './services/market-ws-session';
 import { rememberWalletPassphrase } from './services/wallet-session';
 import {
   readWalletRecord,
@@ -34,6 +40,7 @@ type ViewState =
   | { kind: 'error'; message: string };
 
 export const App: FC<AppProps> = ({ cli, commandName }) => {
+  const [marketSession, setMarketSession] = useState<MarketWsSession>();
   const [viewState, setViewState] = useState<ViewState>({ kind: 'loading' });
   const [walletStepError, setWalletStepError] = useState<string>();
   const [isSavingWallet, setIsSavingWallet] = useState(false);
@@ -47,7 +54,21 @@ export const App: FC<AppProps> = ({ cli, commandName }) => {
       'DeepX TUI boot',
       `network=${cli.network.id} mode=${cli.mode}`,
     );
-  }, [cli.mode, cli.network.id]);
+    const session = acquireSharedMarketWsSession(cli.network);
+    setMarketSession(session);
+    const handleProcessExit = () => {
+      releaseSharedMarketWsSession(session);
+    };
+
+    process.once('beforeExit', handleProcessExit);
+    process.once('exit', handleProcessExit);
+
+    return () => {
+      process.off('beforeExit', handleProcessExit);
+      process.off('exit', handleProcessExit);
+      releaseSharedMarketWsSession(session);
+    };
+  }, [cli.mode, cli.network]);
 
   useEffect(() => {
     let isMounted = true;
@@ -194,8 +215,18 @@ export const App: FC<AppProps> = ({ cli, commandName }) => {
     );
   }
 
+  if (!marketSession) {
+    return (
+      <CenterCard
+        title="Booting DeepX TUI"
+        subtitle={`Starting ${cli.network.label} session...`}
+      />
+    );
+  }
+
   return (
     <DashboardScreen
+      marketSession={marketSession}
       mode={cli.mode}
       network={cli.network}
       walletAddress={viewState.wallet?.address}

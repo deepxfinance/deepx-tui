@@ -603,6 +603,127 @@ describe('agent chat service', () => {
     });
   });
 
+  test('streams assistant text updates when the SDK supports chunked responses', async () => {
+    const streamCalls: GenerateContentParameters[] = [];
+    const streamedText: string[] = [];
+    const client: GenAiClientLike = {
+      models: {
+        async generateContent() {
+          throw new Error('The non-streaming path should not be used.');
+        },
+        async generateContentStream(input) {
+          streamCalls.push(input);
+
+          return (async function* () {
+            yield { text: 'Hel' };
+            yield { text: 'Hello' };
+          })();
+        },
+      },
+    };
+
+    const result = await requestAgentChatWithActions({
+      messages: [{ id: 'user-1', role: 'user', content: 'Say hello.' }],
+      context: {
+        network: 'deepx_devnet',
+        pairLabel: 'BTC-USDC',
+        priceLabel: '68250.40',
+        resolutionLabel: '15m',
+        walletUnlocked: true,
+      },
+      client,
+      onText(text) {
+        streamedText.push(text);
+      },
+    });
+
+    expect(result).toEqual({
+      kind: 'final',
+      reply: 'Hello',
+      stagedOrder: undefined,
+    });
+    expect(streamCalls).toHaveLength(1);
+    expect(streamedText).toEqual(['', 'Hel', 'Hello']);
+  });
+
+  test('preserves streamed tool-call parts for later continuation', async () => {
+    const client: GenAiClientLike = {
+      models: {
+        async generateContent() {
+          throw new Error('The non-streaming path should not be used.');
+        },
+        async generateContentStream() {
+          return (async function* () {
+            yield {
+              candidates: [
+                {
+                  content: {
+                    role: 'model',
+                    parts: [
+                      {
+                        functionCall: {
+                          id: 'call-stream-1',
+                          name: 'deepx_place_order',
+                          args: {
+                            pair: 'ETH-USDC',
+                            side: 'BUY',
+                            type: 'LIMIT',
+                            size: '1',
+                            price: '1000',
+                          },
+                        },
+                        thoughtSignature: 'sig-stream-1',
+                      },
+                    ],
+                  },
+                },
+              ],
+            };
+          })();
+        },
+      },
+    };
+
+    const result = await requestAgentChatWithActions({
+      messages: [
+        { id: 'user-1', role: 'user', content: 'Submit that order now.' },
+      ],
+      context: {
+        network: 'deepx_devnet',
+        pairLabel: 'ETH-USDC',
+        priceLabel: '1000.00',
+        resolutionLabel: '15m',
+        walletUnlocked: true,
+      },
+      client,
+    });
+
+    expect(result.kind).toBe('needs_user_action');
+    if (result.kind !== 'needs_user_action') {
+      throw new Error('Expected pending user action.');
+    }
+
+    expect(result.continuation.modelToolCallContent).toEqual({
+      role: 'model',
+      parts: [
+        {
+          functionCall: {
+            id: 'call-stream-1',
+            name: 'deepx_place_order',
+            args: {
+              pair: 'ETH-USDC',
+              side: 'BUY',
+              type: 'LIMIT',
+              size: '1',
+              price: '1000',
+            },
+          },
+          thoughtSignature: 'sig-stream-1',
+        },
+      ],
+    });
+  });
+
   test('rejects requests without a user prompt', async () => {
     await expect(
       requestAgentChat({

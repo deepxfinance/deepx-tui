@@ -4,7 +4,10 @@ import {
   formatWebSocketDelay,
   getWebSocketDelayTone,
 } from '../src/lib/dashboard-status';
-import { isWebSocketPongMessage } from '../src/services/use-market-data';
+import {
+  isSelectedMarketMessage,
+  isWebSocketPongMessage,
+} from '../src/services/use-market-data';
 
 describe('dashboard status helpers', () => {
   test('formats websocket delay labels', () => {
@@ -28,5 +31,15 @@ describe('dashboard status helpers', () => {
     expect(isWebSocketPongMessage({ type: 'data', channel: 'trades' })).toBe(
       false,
     );
+  });
+
+  test('ignores market websocket payloads for other pairs', () => {
+    expect(
+      isSelectedMarketMessage({ market: { name: 'ETH-USDC' } }, 'ETH-USDC'),
+    ).toBe(true);
+    expect(
+      isSelectedMarketMessage({ market: { name: 'SOL-USDC' } }, 'ETH-USDC'),
+    ).toBe(false);
+    expect(isSelectedMarketMessage({}, 'ETH-USDC')).toBe(true);
   });
 });

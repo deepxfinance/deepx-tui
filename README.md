@@ -64,6 +64,7 @@ Direct entrypoint:
 - wallet storage is local and per-network
 - successful unlock keeps the wallet passphrase in process memory for the active session
 - the app opens into a chat-first fullscreen shell with a welcome panel, AI transcript, slash commands, pair picker, confirmation selector, bottom input bar, and persistent network line
+- startup now also opens a shared market websocket session for the selected network so live market and position consumers reuse one transport
 - typing `/` in the input bar opens a live command selector so slash commands can be picked with the keyboard before submission
 - `/candle` and `/orderbook` select a pair first, then render the requested market view in the workspace area
 - sensitive values such as `privateKey`, `passphrase`, and `signedTx` are redacted before entering logs
@@ -86,6 +87,7 @@ Direct entrypoint:
 - the agent can also read the current local wallet portfolio, including balances, borrowing, and perp positions, through a read-only portfolio tool
 - the agent can list Subaccount contract subaccounts for the local wallet and prepare new subaccount creation requests through `deepx_create_subaccount`
 - trade prompts such as `buy 0.001 ETH` or `sell 2 SOL at 150` go through the AI agent instead of a local parser shortcut
+- assistant replies stream into the transcript as text arrives when the GenAI SDK returns chunked output
 - confirmed perp orders can be submitted as live transactions when the wallet is already unlocked for the session
 - the agent tool layer also understands perp position-close and TP/SL update requests
 - AI-driven live-capable tool calls pause for a below-input Confirm/Cancel selector, then resume the agent with the local execution or cancellation result
@@ -101,6 +103,7 @@ Direct entrypoint:
 - `backspace` edits the input bar
 - `esc` skips wallet boot, cancels a pending confirmation or passphrase prompt, or exits pair selection back to the input bar
 - `up` and `down` move through the pair picker after `/candle` or `/orderbook`
+- `pageup` and `pagedown` scroll the chat transcript without forcing it back to the newest message
 - `left` and `right` move through the confirmation selector while a staged order or AI action is pending
 - `[` and `]` change chart resolution while candle view is active
 

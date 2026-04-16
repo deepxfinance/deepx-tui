@@ -1,8 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import { parseUnits } from 'ethers';
 
+import { getNetworkConfig } from '../src/config/networks';
+import {
+  acquireSharedMarketWsSession,
+  releaseSharedMarketWsSession,
+  resetSharedMarketWsSessions,
+} from '../src/services/market-ws-session';
 import {
   buildPositionPanelRows,
+  fetchUserPerpPositionsSnapshot,
   mergePerpPositions,
   type PerpPosition,
   parseUserPerpPositionsMessage,
@@ -64,7 +71,7 @@ describe('parseUserPerpPositionsMessage', () => {
     expect(parsed?.positions[0]?.fundingPayment).toBe(parseUnits('-1.25', 6));
   });
 
-  test('ignores other addresses and zero-size payload items', () => {
+  test('ignores mismatched subaccount addresses and zero-size payload items', () => {
     const parsed = parseUserPerpPositionsMessage(
       JSON.stringify({
         channel: 'user_perp_positions',
@@ -96,6 +103,38 @@ describe('parseUserPerpPositionsMessage', () => {
     expect(parsed).toBeNull();
     expect(zeroSized?.positions).toEqual([]);
   });
+
+  test('accepts wallet-scoped payloads for subaccount owners', () => {
+    const subaccountAddress = '0xabcd00000000000000000000000000000000abcd';
+    const parsed = parseUserPerpPositionsMessage(
+      JSON.stringify({
+        channel: 'user_perp_positions',
+        market: { id: 3 },
+        data: {
+          address: subaccountAddress,
+          positions: {
+            items: [
+              {
+                market_id: 3,
+                is_long: true,
+                base_asset_amount: '0.5',
+                entry_price: '1800',
+                leverage: 5,
+                owner: subaccountAddress,
+              },
+            ],
+          },
+        },
+      }),
+      walletAddress,
+      perpPairs,
+      { addressScope: 'wallet' },
+    );
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.owner).toBe(subaccountAddress);
+    expect(parsed?.positions[0]?.owner).toBe(subaccountAddress);
+  });
 });
 
 describe('mergePerpPositions', () => {
@@ -115,6 +154,287 @@ describe('mergePerpPositions', () => {
       merged.find((position) => position.marketId === 3)?.unrealizedPnl,
     ).toBe(parseUnits('8', 6));
     expect(merged.find((position) => position.marketId === 4)).toBeDefined();
+  });
+
+  test('clears only the matching market for a wallet-scoped subaccount snapshot', () => {
+    const subaccountAddress = '0xabcd00000000000000000000000000000000abcd';
+    const existing = [
+      createPosition({
+        marketId: 3,
+        owner: subaccountAddress,
+        unrealizedPnl: '5',
+      }),
+      createPosition({
+        marketId: 4,
+        owner: subaccountAddress,
+        unrealizedPnl: '2',
+      }),
+    ];
+
+    const merged = mergePerpPositions(existing, [], subaccountAddress, 3);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.marketId).toBe(4);
+    expect(merged[0]?.owner).toBe(subaccountAddress);
+  });
+});
+
+describe('fetchUserPerpPositionsSnapshot', () => {
+  test('collects wallet-scoped market snapshots over websocket', async () => {
+    const sockets: MockWebSocket[] = [];
+    const fetchPromise = fetchUserPerpPositionsSnapshot({
+      network: getNetworkConfig('devnet'),
+      walletAddress,
+      perpPairs,
+      timeoutMs: 100,
+      createWebSocket(url) {
+        const socket = new MockWebSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    const socket = sockets[0];
+    if (!socket) {
+      throw new Error('Expected websocket to be created');
+    }
+
+    socket.open();
+    expect(JSON.parse(socket.sent[0] ?? '{}')).toMatchObject({
+      action: 'multi_subscribe',
+      subscriptions: [
+        {
+          channel: 'user_perp_positions',
+          address: walletAddress,
+          addressType: 'wallet',
+          status: 'open',
+        },
+      ],
+    });
+
+    socket.message({
+      channel: 'user_perp_positions',
+      market: { id: 3 },
+      data: {
+        address: '0xabcd00000000000000000000000000000000abcd',
+        positions: {
+          items: [
+            {
+              market_id: 3,
+              is_long: true,
+              base_asset_amount: '0.5',
+              entry_price: '1800',
+              leverage: 5,
+              owner: '0xabcd00000000000000000000000000000000abcd',
+            },
+          ],
+        },
+      },
+    });
+    socket.message({
+      channel: 'user_perp_positions',
+      market: { id: 4 },
+      data: {
+        address: '0xabcd00000000000000000000000000000000abcd',
+        positions: { items: [] },
+      },
+    });
+
+    const positions = await fetchPromise;
+
+    expect(positions).toHaveLength(1);
+    expect(positions[0]).toMatchObject({
+      marketId: 3,
+      owner: '0xabcd00000000000000000000000000000000abcd',
+      isLong: true,
+    });
+  });
+
+  test('reuses the shared market session instead of opening a second socket', async () => {
+    resetSharedMarketWsSessions();
+    const sockets: MockWebSocket[] = [];
+    const session = acquireSharedMarketWsSession(getNetworkConfig('devnet'), {
+      createWebSocket(url) {
+        const socket = new MockWebSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    const socket = sockets[0];
+    if (!socket) {
+      throw new Error('Expected shared websocket to be created');
+    }
+
+    socket.open();
+    socket.sent = [];
+
+    const fetchPromise = fetchUserPerpPositionsSnapshot({
+      network: getNetworkConfig('devnet'),
+      walletAddress,
+      perpPairs,
+      createWebSocket() {
+        throw new Error('Unexpected fallback websocket creation');
+      },
+    });
+
+    expect(sockets).toHaveLength(1);
+    expect(JSON.parse(socket.sent[0] ?? '{}')).toMatchObject({
+      action: 'multi_subscribe',
+      subscriptions: [
+        {
+          channel: 'user_perp_positions',
+          address: walletAddress,
+          addressType: 'wallet',
+          status: 'open',
+        },
+      ],
+    });
+
+    socket.message({
+      channel: 'user_perp_positions',
+      market: { id: 3 },
+      data: {
+        address: '0xabcd00000000000000000000000000000000abcd',
+        positions: {
+          items: [
+            {
+              market_id: 3,
+              is_long: true,
+              base_asset_amount: '0.5',
+              entry_price: '1800',
+              leverage: 5,
+              owner: '0xabcd00000000000000000000000000000000abcd',
+            },
+          ],
+        },
+      },
+    });
+    socket.message({
+      channel: 'user_perp_positions',
+      market: { id: 4 },
+      data: {
+        address: '0xabcd00000000000000000000000000000000abcd',
+        positions: { items: [] },
+      },
+    });
+
+    const positions = await fetchPromise;
+
+    expect(positions).toHaveLength(1);
+    expect(positions[0]).toMatchObject({
+      marketId: 3,
+      owner: '0xabcd00000000000000000000000000000000abcd',
+      isLong: true,
+    });
+
+    releaseSharedMarketWsSession(session);
+    resetSharedMarketWsSessions();
+  });
+
+  test('forces a fresh subscribe for snapshots even when a live positions consumer is already active', async () => {
+    resetSharedMarketWsSessions();
+    const sockets: MockWebSocket[] = [];
+    const session = acquireSharedMarketWsSession(getNetworkConfig('devnet'), {
+      createWebSocket(url) {
+        const socket = new MockWebSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    const socket = sockets[0];
+    if (!socket) {
+      throw new Error('Expected shared websocket to be created');
+    }
+
+    socket.open();
+    socket.sent = [];
+
+    const unsubscribeLivePositions = session.subscribe({
+      key: `positions:${walletAddress.toLowerCase()}:3,4`,
+      payload: JSON.stringify({
+        action: 'multi_subscribe',
+        markets: [
+          { type: 'perp', id: 3 },
+          { type: 'perp', id: 4 },
+        ],
+        subscriptions: [
+          {
+            channel: 'user_perp_positions',
+            address: walletAddress,
+            addressType: 'wallet',
+            status: 'open',
+          },
+        ],
+        options: {
+          compress: false,
+        },
+      }),
+      scope: 'positions-ws',
+      onMessage() {},
+    });
+
+    expect(socket.sent).toHaveLength(1);
+    socket.sent = [];
+
+    const fetchPromise = fetchUserPerpPositionsSnapshot({
+      network: getNetworkConfig('devnet'),
+      walletAddress,
+      perpPairs,
+      createWebSocket() {
+        throw new Error('Unexpected fallback websocket creation');
+      },
+    });
+
+    expect(socket.sent).toHaveLength(1);
+    expect(JSON.parse(socket.sent[0] ?? '{}')).toMatchObject({
+      action: 'multi_subscribe',
+      subscriptions: [
+        {
+          channel: 'user_perp_positions',
+          address: walletAddress,
+          addressType: 'wallet',
+          status: 'open',
+        },
+      ],
+    });
+
+    socket.message({
+      channel: 'user_perp_positions',
+      market: { id: 3 },
+      data: {
+        address: '0xabcd00000000000000000000000000000000abcd',
+        positions: {
+          items: [
+            {
+              market_id: 3,
+              is_long: true,
+              base_asset_amount: '0.5',
+              entry_price: '1800',
+              leverage: 5,
+              owner: '0xabcd00000000000000000000000000000000abcd',
+            },
+          ],
+        },
+      },
+    });
+    socket.message({
+      channel: 'user_perp_positions',
+      market: { id: 4 },
+      data: {
+        address: '0xabcd00000000000000000000000000000000abcd',
+        positions: { items: [] },
+      },
+    });
+
+    const positions = await fetchPromise;
+
+    expect(positions).toHaveLength(1);
+
+    unsubscribeLivePositions();
+    releaseSharedMarketWsSession(session);
+    resetSharedMarketWsSessions();
   });
 });
 
@@ -139,12 +459,50 @@ describe('buildPositionPanelRows', () => {
     });
 
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.text).toContain('ETH-USDC');
-    expect(rows[0]?.text).toContain('LONG10x');
-    expect(rows[0]?.text).toContain('0.125');
-    expect(rows[0]?.text).toContain('1820.5');
-    expect(rows[0]?.text).toContain('+9.93');
-    expect(rows[0]?.tone).toBe('green');
+    const row = rows[0];
+    expect(row?.text).toContain('ETH-USDC');
+    expect(row?.text).toContain('LONG10x');
+    expect(row?.text).toContain('0.125');
+    expect(row?.text).toContain('1820.5');
+    expect(row?.text).toContain('+9.93');
+    expect(row?.variant).toBe('position');
+    if (!row || row.variant !== 'position') {
+      throw new Error('expected position row');
+    }
+
+    expect(row.sideTone).toBe('green');
+    expect(row.pnlTone).toBe('green');
+    expect(row.tone).toBe('green');
+  });
+
+  test('tracks short-side and negative pnl colors separately', () => {
+    const rows = buildPositionPanelRows({
+      positions: [
+        createPosition({
+          marketId: 3,
+          isLong: false,
+          baseAssetAmount: '0.125',
+          entryPrice: '1820.5',
+          leverage: 10,
+          unrealizedPnl: '-1',
+        }),
+      ],
+      pairs: perpPairs,
+      overview: {
+        'ETH-USDC': { latestPrice: 1900 },
+      },
+      maxRows: 3,
+    });
+
+    const row = rows[0];
+    expect(row?.variant).toBe('position');
+    if (!row || row.variant !== 'position') {
+      throw new Error('expected position row');
+    }
+
+    expect(row.sideTone).toBe('red');
+    expect(row.pnlTone).toBe('red');
+    expect(row.tone).toBe('red');
   });
 
   test('returns an empty-state row when there are no positions', () => {
@@ -160,6 +518,7 @@ describe('buildPositionPanelRows', () => {
         key: 'empty',
         text: 'No open perp positions.',
         tone: 'gray',
+        variant: 'message',
       },
     ]);
   });
@@ -200,4 +559,51 @@ function getBaseDecimals(marketId: number) {
   return (
     perpPairs.find((pair) => pair.marketId === marketId)?.baseDecimals ?? 18
   );
+}
+
+class MockWebSocket {
+  readyState = 0;
+  sent: string[] = [];
+  private readonly listeners: Record<
+    string,
+    Array<(event?: { data?: unknown }) => void>
+  > = {
+    open: [],
+    message: [],
+    close: [],
+    error: [],
+  };
+
+  constructor(readonly url: string) {}
+
+  addEventListener(
+    type: string,
+    listener: (event?: { data?: unknown }) => void,
+  ) {
+    this.listeners[type]?.push(listener);
+  }
+
+  send(payload: string) {
+    this.sent.push(payload);
+  }
+
+  close() {
+    this.readyState = 3;
+    this.emit('close');
+  }
+
+  open() {
+    this.readyState = 1;
+    this.emit('open');
+  }
+
+  message(payload: unknown) {
+    this.emit('message', { data: JSON.stringify(payload) });
+  }
+
+  private emit(type: string, event?: { data?: unknown }) {
+    for (const listener of this.listeners[type] ?? []) {
+      listener(event);
+    }
+  }
 }

@@ -2,15 +2,24 @@ import { Contract, toUtf8Bytes, Wallet } from 'ethers';
 
 import { getNetworkConfig, type RuntimeNetwork } from '../config/networks';
 import { SUBACCOUNT_CONTRACT_ADDRESS } from './subaccount-contract';
-import {
-  createRpcProvider,
-  submitRpcTransaction,
-} from './transaction-submission';
+import { createRpcProvider } from './transaction-submission';
 import { getRememberedWalletPassphrase } from './wallet-session';
 import { decryptPrivateKey, readWalletRecord } from './wallet-store';
 
-const SUBACCOUNT_INITIALIZE_ABI = [
-  'function initializeSubaccount(bytes name)',
+export const SUBACCOUNT_INITIALIZE_ABI = [
+  {
+    inputs: [
+      {
+        internalType: 'bytes',
+        name: 'name',
+        type: 'bytes',
+      },
+    ],
+    name: 'initializeSubaccount',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
 ] as const;
 
 const INITIALIZE_SUBACCOUNT_GAS_LIMIT = 1000000n;
@@ -40,6 +49,24 @@ export type CreateSubaccountToolResult =
       explorerUrl: string;
       summary: string;
     };
+
+type InitializeSubaccountContract = {
+  getFunction(name: 'initializeSubaccount'): {
+    populateTransaction(name: Uint8Array): Promise<Record<string, unknown>>;
+  };
+};
+
+type InitializeSubaccountSigner = {
+  sendTransaction(
+    request: Record<string, unknown> & {
+      gasLimit: bigint;
+      chainId: number;
+    },
+  ): Promise<{
+    hash: string;
+    wait(): Promise<{ status: number } | null>;
+  }>;
+};
 
 export async function createSubaccountTool(
   input: CreateSubaccountInput,
@@ -91,22 +118,11 @@ export async function initializeSubaccountLive(input: {
     SUBACCOUNT_INITIALIZE_ABI,
     signer,
   );
-  // biome-ignore lint/complexity/useDateNow: DeepX transaction nonces use Date valueOf for backend compatibility.
-  const nonce = new Date().valueOf();
-  const txRequest = await contract
-    .getFunction('initializeSubaccount')
-    .populateTransaction(encodeSubaccountName(name));
-
-  const signedTx = await signer.signTransaction({
-    ...txRequest,
-    nonce,
+  const txHash = await sendInitializeSubaccountTransaction({
+    contract,
+    signer,
     chainId: network.chainId,
-    gasLimit: INITIALIZE_SUBACCOUNT_GAS_LIMIT,
-  });
-  const { txHash } = await submitRpcTransaction({
-    network,
-    provider,
-    signedTx,
+    name,
   });
   const explorerUrl = `${network.explorerUrl}/tx/${txHash}`;
 
@@ -128,6 +144,35 @@ export async function initializeSubaccountLive(input: {
 
 export function encodeSubaccountName(name: string) {
   return toUtf8Bytes(normalizeSubaccountName(name));
+}
+
+export async function sendInitializeSubaccountTransaction(input: {
+  contract: InitializeSubaccountContract;
+  signer: InitializeSubaccountSigner;
+  chainId: number;
+  name: string;
+}) {
+  const txRequest = await input.contract
+    .getFunction('initializeSubaccount')
+    .populateTransaction(encodeSubaccountName(input.name));
+  const txResponse = await input.signer.sendTransaction({
+    ...txRequest,
+    gasLimit: INITIALIZE_SUBACCOUNT_GAS_LIMIT,
+    chainId: input.chainId,
+  });
+  const receipt = await txResponse.wait();
+
+  if (!receipt) {
+    throw new Error(
+      `Transaction ${txResponse.hash} was submitted but no receipt was returned.`,
+    );
+  }
+
+  if (receipt.status === 0) {
+    throw new Error(`Transaction ${txResponse.hash} reverted.`);
+  }
+
+  return txResponse.hash;
 }
 
 export function buildDryRunSubaccountCreation(input: {

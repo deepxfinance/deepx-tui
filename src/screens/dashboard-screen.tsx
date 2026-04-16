@@ -1,7 +1,7 @@
 import process from 'node:process';
 import { Box, Text, useApp, useInput } from 'ink';
 import type { FC, ReactNode } from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { CandleChart } from '../components/chart/candle-chart';
 import { OrderbookPanel } from '../components/orderbook-panel';
@@ -10,17 +10,29 @@ import {
   appendChatMessage,
   type ChatMessage,
   getChatLoadingSegments,
+  getMaxChatScrollOffset,
   getVisibleChatMessages,
 } from '../lib/dashboard-chat';
 import {
   buildCommandPaletteItems,
   buildPairPickerItems,
+  buildPairPickerOptions,
   formatNetworkLine,
   formatShellComposerLine,
+  getHistoryValue,
+  getNextWordIndex,
+  getPrevWordIndex,
+  insertCharAt,
   isSlashCommandInput,
   moveSelectionIndex,
   parseShellInput,
+  removeCharAt,
+  removeLineAfter,
+  removeLineBefore,
+  removeWordAfter,
+  removeWordBefore,
   type ShellCommand,
+  shouldCommandPaletteCaptureArrows,
 } from '../lib/dashboard-input';
 import { formatErrorMessage } from '../lib/error-format';
 import {
@@ -39,12 +51,14 @@ import {
 } from '../services/chat-trade-intent';
 import { logError, logInfo } from '../services/logger';
 import type { MarketPair, PairKind } from '../services/market-catalog';
+import type { MarketWsSession } from '../services/market-ws-session';
 import { placeOrderTool } from '../services/order-tools';
 import { useMarketData } from '../services/use-market-data';
 import { getRememberedWalletPassphrase } from '../services/wallet-session';
 import { buildHelpLines, HelpContent } from './help-screen';
 
 type DashboardScreenProps = {
+  marketSession: MarketWsSession;
   mode: 'default' | 'debug';
   network: NetworkConfig;
   walletAddress?: string;
@@ -82,12 +96,14 @@ const CHAT_USER_COLOR = '#FFD166';
 const CHAT_ASSISTANT_COLOR = '#7FDBFF';
 const CHAT_ASSISTANT_LABEL_COLOR = '#D7E3F4';
 const CHAT_ASSISTANT_LINK_COLOR = '#AAB6FF';
+const CHAT_VISIBLE_MESSAGE_COUNT = 8;
 const WELCOME_LOGO_COLOR = '#34FFAD';
 const WELCOME_LOGO_IDLE_COLOR = '#0F5C41';
 const WELCOME_LOGO_GUIDE_COLOR = '#335C4D';
 const WELCOME_LOGO_ANIMATION_INTERVAL_MS = 30;
 const WELCOME_LOGO_BLINK_FRAMES = 4;
 const CHAT_LOADING_ANIMATION_INTERVAL_MS = 80;
+const TRANSCRIPT_SCROLL_STEP = 4;
 const COMMAND_TEXT_COLOR = 'gray';
 const COMMAND_HIGHLIGHT_COLOR = '#AAB6FF';
 const TRANSACTION_CONFIRMATION_ITEMS = [
@@ -238,7 +254,18 @@ export function getTranscriptMessageSpacing(
   return 0;
 }
 
+export function getTranscriptMessageTrailingSpacing(
+  role?: ChatMessage['role'],
+) {
+  if (role === 'assistant') {
+    return 1;
+  }
+
+  return 0;
+}
+
 export const DashboardScreen: FC<DashboardScreenProps> = ({
+  marketSession,
   mode,
   network,
   walletAddress,
@@ -249,6 +276,16 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
   const [pairIndex, setPairIndex] = useState(0);
   const [resolution, setResolution] = useState('15');
   const [inputValue, setInputValue] = useState('');
+  const [inputCursorIndex, setInputCursorIndex] = useState(0);
+  const [inputHistory, setInputHistory] = useState<string[]>([]);
+  const [inputHistoryIndex, setInputHistoryIndex] = useState<number | null>(
+    null,
+  );
+  const [inputDraftValue, setInputDraftValue] = useState('');
+  const inputValueRef = useRef(inputValue);
+  const inputCursorIndexRef = useRef(inputCursorIndex);
+  const inputHistoryIndexRef = useRef(inputHistoryIndex);
+  const inputDraftValueRef = useRef(inputDraftValue);
   const [shellMode, setShellMode] = useState<ShellMode>('chat');
   const [pairPickerIndex, setPairPickerIndex] = useState(0);
   const [pendingCommand, setPendingCommand] = useState<
@@ -258,8 +295,10 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     getInitialOutputView(mode),
   );
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => []);
+  const [transcriptScrollOffset, setTranscriptScrollOffset] = useState(0);
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [chatLoadingFrame, setChatLoadingFrame] = useState(0);
+  const [streamingAssistantReply, setStreamingAssistantReply] = useState('');
   const [pendingChatTrade, setPendingChatTrade] =
     useState<ParsedChatTradeIntent>();
   const [transactionConfirmationIndex, setTransactionConfirmationIndex] =
@@ -285,6 +324,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     candleError,
     orderbookError,
   } = useMarketData({
+    marketSession,
     network,
     pairKind,
     pairIndex,
@@ -297,17 +337,30 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
   const priceLabel =
     activePrice > 0 ? activePrice.toFixed(currentPair.priceDecimal) : '--';
   const resolutionLabel = formatResolution(resolution);
-  const visibleChatMessages = useMemo(
-    () => getVisibleChatMessages(chatMessages, 8),
+  const maxTranscriptScrollOffset = useMemo(
+    () => getMaxChatScrollOffset(chatMessages, CHAT_VISIBLE_MESSAGE_COUNT),
     [chatMessages],
+  );
+  const visibleChatMessages = useMemo(
+    () =>
+      getVisibleChatMessages(
+        chatMessages,
+        CHAT_VISIBLE_MESSAGE_COUNT,
+        transcriptScrollOffset,
+      ),
+    [chatMessages, transcriptScrollOffset],
   );
   const pairOptions = useMemo(
     () => [...pairGroups.perp, ...pairGroups.spot],
     [pairGroups.perp, pairGroups.spot],
   );
-  const pairPickerItems = useMemo(
-    () => buildPairPickerItems(pairOptions),
+  const pairPickerOptions = useMemo(
+    () => buildPairPickerOptions(pairOptions),
     [pairOptions],
+  );
+  const pairPickerItems = useMemo(
+    () => buildPairPickerItems(pairPickerOptions),
+    [pairPickerOptions],
   );
   const commandPaletteItems = useMemo(
     () => buildCommandPaletteItems(inputValue),
@@ -353,7 +406,49 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     });
   }, [commandPaletteItems]);
 
+  useEffect(() => {
+    setTranscriptScrollOffset((current) =>
+      Math.min(current, maxTranscriptScrollOffset),
+    );
+  }, [maxTranscriptScrollOffset]);
+
+  function setComposerValue(nextValue: string) {
+    inputValueRef.current = nextValue;
+    setInputValue(nextValue);
+  }
+
+  function setComposerCursor(nextCursor: number) {
+    const resolvedCursor = Math.max(
+      0,
+      Math.min(nextCursor, inputValueRef.current.length),
+    );
+    inputCursorIndexRef.current = resolvedCursor;
+    setInputCursorIndex(resolvedCursor);
+  }
+
+  function setComposerHistoryIndex(nextIndex: number | null) {
+    inputHistoryIndexRef.current = nextIndex;
+    setInputHistoryIndex(nextIndex);
+  }
+
+  function setComposerDraftValue(nextDraftValue: string) {
+    inputDraftValueRef.current = nextDraftValue;
+    setInputDraftValue(nextDraftValue);
+  }
+
+  function setComposerState(nextValue: string, nextCursor: number) {
+    setComposerValue(nextValue);
+    setComposerCursor(nextCursor);
+  }
+
   useInput((input, key) => {
+    const hasModifier = key.ctrl || key.meta;
+    const isBackspace =
+      key.backspace || input === '\x7f' || input === '\x08' || input === '\b';
+    const isDelete = key.delete || (hasModifier && input === 'd');
+    const composerValue = inputValueRef.current;
+    const composerCursor = inputCursorIndexRef.current;
+
     if (input === 'q' && shellMode === 'chat') {
       exit();
       return;
@@ -382,7 +477,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       }
 
       if (key.return) {
-        const nextPair = pairOptions[pairPickerIndex];
+        const nextPair = pairPickerOptions[pairPickerIndex];
         if (nextPair && pendingCommand) {
           activatePair(nextPair);
           setOutputView({ kind: pendingCommand });
@@ -403,7 +498,10 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       return;
     }
 
-    if (isCommandPaletteVisible) {
+    if (
+      isCommandPaletteVisible &&
+      shouldCommandPaletteCaptureArrows(composerValue)
+    ) {
       if (key.upArrow) {
         setCommandPaletteIndex((current) =>
           moveSelectionIndex(current, commandPaletteItems.length, -1),
@@ -439,7 +537,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
           return;
         }
 
-        if (key.backspace || key.delete) {
+        if (isBackspace || isDelete) {
           setAgentActionPassphrase((value) => value.slice(0, -1));
           return;
         }
@@ -524,13 +622,114 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       return;
     }
 
-    if (key.backspace || key.delete) {
-      setInputValue((value) => value.slice(0, -1));
+    if ((hasModifier && input === 'a') || (key as { home?: boolean }).home) {
+      setInputCursorIndex(0);
+      return;
+    }
+
+    if ((hasModifier && input === 'e') || (key as { end?: boolean }).end) {
+      setComposerCursor(composerValue.length);
+      return;
+    }
+
+    if ((key as { pageUp?: boolean }).pageUp) {
+      setTranscriptScrollOffset((current) =>
+        Math.min(maxTranscriptScrollOffset, current + TRANSCRIPT_SCROLL_STEP),
+      );
+      return;
+    }
+
+    if ((key as { pageDown?: boolean }).pageDown) {
+      setTranscriptScrollOffset((current) =>
+        Math.max(0, current - TRANSCRIPT_SCROLL_STEP),
+      );
+      return;
+    }
+
+    if (key.upArrow) {
+      const next = getHistoryValue(
+        inputHistory,
+        inputHistoryIndexRef.current,
+        'up',
+        inputHistoryIndexRef.current === null
+          ? composerValue
+          : inputDraftValueRef.current,
+      );
+      if (inputHistoryIndexRef.current === null) {
+        setComposerDraftValue(composerValue);
+      }
+      setComposerHistoryIndex(next.nextIndex);
+      setComposerState(next.nextValue, next.nextValue.length);
+      return;
+    }
+
+    if (key.downArrow) {
+      const next = getHistoryValue(
+        inputHistory,
+        inputHistoryIndexRef.current,
+        'down',
+        inputDraftValueRef.current,
+      );
+      setComposerHistoryIndex(next.nextIndex);
+      setComposerState(next.nextValue, next.nextValue.length);
+      return;
+    }
+
+    if (key.leftArrow) {
+      setComposerCursor(
+        hasModifier
+          ? getPrevWordIndex(composerValue, composerCursor)
+          : Math.max(0, composerCursor - 1),
+      );
+      return;
+    }
+
+    if (key.rightArrow) {
+      setComposerCursor(
+        hasModifier
+          ? getNextWordIndex(composerValue, composerCursor)
+          : Math.min(composerValue.length, composerCursor + 1),
+      );
+      return;
+    }
+
+    if (hasModifier && input === 'u') {
+      const nextValue = removeLineBefore(composerValue, composerCursor);
+      setComposerState(nextValue, 0);
       return;
     }
 
     if (key.escape) {
-      setInputValue('');
+      resetInputComposer();
+      return;
+    }
+
+    if (hasModifier && input === 'k') {
+      setComposerValue(removeLineAfter(composerValue, composerCursor));
+      return;
+    }
+
+    if (hasModifier && input === 'w') {
+      const nextCursor = getPrevWordIndex(composerValue, composerCursor);
+      const nextValue = removeWordBefore(composerValue, composerCursor);
+      setComposerState(nextValue, nextCursor);
+      return;
+    }
+
+    if (isBackspace) {
+      const nextValue = removeCharAt(composerValue, composerCursor);
+      if (nextValue !== composerValue) {
+        setComposerState(nextValue, Math.max(0, composerCursor - 1));
+      }
+      return;
+    }
+
+    if (isDelete) {
+      const nextValue =
+        hasModifier || input === 'd'
+          ? removeWordAfter(composerValue, composerCursor)
+          : removeCharAt(composerValue, composerCursor, true);
+      setComposerValue(nextValue);
       return;
     }
 
@@ -544,14 +743,16 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       return;
     }
 
-    if (!key.ctrl && !key.meta && input.length > 0) {
+    if (!hasModifier && input.length > 0) {
       if (
-        inputValue.length === 0 &&
+        composerValue.length === 0 &&
         (outputView.kind === 'candle' || outputView.kind === 'orderbook')
       ) {
         setOutputView({ kind: 'empty' });
       }
-      setInputValue((value) => `${value}${input}`);
+
+      const nextValue = insertCharAt(composerValue, composerCursor, input);
+      setComposerState(nextValue, composerCursor + input.length);
     }
   });
 
@@ -566,11 +767,13 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       return;
     }
 
-    setInputValue('');
+    rememberInputHistory(inputValue);
+    resetInputComposer();
     const content = parsed.message;
     const nextMessages = appendChatMessage(chatMessages, 'user', content);
     setChatMessages(nextMessages);
     setIsChatLoading(true);
+    setStreamingAssistantReply('');
 
     try {
       if (pendingChatTrade && isTradeConfirmationMessage(content)) {
@@ -596,8 +799,10 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
           resolutionLabel,
           walletUnlocked,
         },
+        onText: setStreamingAssistantReply,
       });
       if (agentResult.kind === 'needs_user_action') {
+        setStreamingAssistantReply('');
         setPendingAgentAction(agentResult.action);
         setPendingAgentContinuation(agentResult.continuation);
         setAgentActionSelectionIndex(0);
@@ -617,6 +822,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
         return;
       }
 
+      setStreamingAssistantReply('');
       setChatMessages((messages) =>
         appendChatMessage(messages, 'assistant', agentResult.reply),
       );
@@ -628,6 +834,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       }
     } catch (error) {
       logError('shell', 'Chat submit failed', formatErrorMessage(error));
+      setStreamingAssistantReply('');
       setChatMessages((messages) =>
         appendChatMessage(
           messages,
@@ -653,7 +860,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
 
     const content = action === 'confirm' ? 'Confirm' : 'Cancel';
     const nextMessages = appendChatMessage(chatMessages, 'user', content);
-    setInputValue('');
+    resetInputComposer();
     setChatMessages(nextMessages);
 
     if (action === 'cancel') {
@@ -690,11 +897,12 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     }
 
     const userContent = action === 'confirm' ? 'Confirm' : 'Cancel';
-    setInputValue('');
+    resetInputComposer();
     setChatMessages((messages) =>
       appendChatMessage(messages, 'user', userContent),
     );
     setIsChatLoading(true);
+    setStreamingAssistantReply('');
 
     try {
       const actionResult =
@@ -710,12 +918,15 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       const agentResult = await continueAgentChatAfterUserAction({
         continuation: pendingAgentContinuation,
         actionResult,
+        onText: setStreamingAssistantReply,
       });
       clearPendingAgentAction();
 
       if (agentResult.kind === 'needs_user_action') {
+        setStreamingAssistantReply('');
         setPendingAgentAction(agentResult.action);
         setPendingAgentContinuation(agentResult.continuation);
+        setAgentActionInputMode('selector');
         setChatMessages((messages) =>
           appendChatMessage(
             messages,
@@ -730,6 +941,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
         return;
       }
 
+      setStreamingAssistantReply('');
       setChatMessages((messages) =>
         appendChatMessage(messages, 'assistant', agentResult.reply),
       );
@@ -742,6 +954,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     } catch (error) {
       logError('shell', 'Agent action failed', formatErrorMessage(error));
       clearPendingAgentAction();
+      setStreamingAssistantReply('');
       setChatMessages((messages) =>
         appendChatMessage(
           messages,
@@ -809,7 +1022,8 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
   }
 
   function submitShellCommand(command: ShellCommand) {
-    setInputValue('');
+    rememberInputHistory(`/${command}`);
+    resetInputComposer();
     setCommandPaletteIndex(0);
     setChatMessages((messages) =>
       appendChatMessage(messages, 'command', `/${command}`),
@@ -826,6 +1040,25 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     setPendingCommand(command);
     setPairPickerIndex(0);
     setShellMode('pair-select');
+  }
+
+  function rememberInputHistory(rawValue: string) {
+    const trimmedValue = rawValue.trim();
+    if (!trimmedValue) {
+      return;
+    }
+
+    setInputHistory((current) =>
+      current[current.length - 1] === trimmedValue
+        ? current
+        : [...current, trimmedValue],
+    );
+  }
+
+  function resetInputComposer() {
+    setComposerState('', 0);
+    setComposerHistoryIndex(null);
+    setComposerDraftValue('');
   }
 
   const frameWidth = Math.max(process.stdout.columns ?? 120, 100);
@@ -858,6 +1091,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
                 visibleChatMessages[index - 1]?.role,
                 message.role,
               )}
+              marginBottom={getTranscriptMessageTrailingSpacing(message.role)}
             >
               <Text
                 color={
@@ -881,7 +1115,25 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
               </Text>
             </Box>
           ))}
-          {isChatLoading ? (
+          {isChatLoading &&
+          transcriptScrollOffset === 0 &&
+          streamingAssistantReply.trim().length > 0 ? (
+            <Box
+              flexDirection="column"
+              marginTop={getTranscriptMessageSpacing(
+                visibleChatMessages[visibleChatMessages.length - 1]?.role,
+                'assistant',
+              )}
+              marginBottom={getTranscriptMessageTrailingSpacing('assistant')}
+            >
+              <Text color={CHAT_ASSISTANT_COLOR}>
+                AI&gt; {renderAssistantMessage(streamingAssistantReply)}
+              </Text>
+            </Box>
+          ) : null}
+          {isChatLoading &&
+          transcriptScrollOffset === 0 &&
+          streamingAssistantReply.trim().length === 0 ? (
             <Box
               flexDirection="column"
               marginTop={getTranscriptMessageSpacing(
@@ -931,7 +1183,9 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
         </Box>
       ) : null}
 
-      <InputSection>{formatShellComposerLine(inputValue, true)}</InputSection>
+      <InputSection>
+        {formatShellComposerLine(inputValue, inputCursorIndex, true)}
+      </InputSection>
 
       {layoutSlots.showCommandPaletteBelowInput ? (
         <Section title="Commands">
@@ -1116,7 +1370,8 @@ const PairPicker: FC<PairPickerProps> = ({ items, selectedIndex }) => {
         </Text>
       ))}
       <Text color="gray">
-        Up/Down move. Enter confirms. Esc returns to input.
+        Up/Down move while filtering. Exact commands return Up/Down to history.
+        Enter confirms. Esc returns to input.
       </Text>
     </Box>
   );

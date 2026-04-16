@@ -35,6 +35,7 @@ bun test
 - Successful unlock keeps the passphrase in process memory for explicit execution workflows in the same session
 - The AI chat panel uses `@google/genai` directly and accepts either `GEMINI_API_KEY` or `GOOGLE_API_KEY`
 - The current agent model target is `gemini-3-flash-preview`
+- The chat system instruction requires pure text replies with no Markdown formatting
 - DeepX tool calls now stay in-process instead of routing through MCP
 - The in-process market tool layer now includes `deepx_get_market_price_info` for latest price and 24h change lookups on supported pairs
 - The in-process tool layer now includes a read-only wallet portfolio helper plus dedicated perp position close and TP/SL update helpers in addition to order placement and cancellation
@@ -44,6 +45,7 @@ bun test
 - Live spot place transactions fetch the wallet's subaccount list over RPC, select the primary Subaccount contract address, and then populate spot contract calls
 - Market ids are network-specific: perp ids come from `/v2/market/perp/markets`, while spot ids come from `/v2/market/spot/markets` and use the bytes32 `pair` value rather than the numeric perp market id
 - The terminal now loads market metadata from the selected backend APIs on demand and caches it per network in-process for the current session
+- The app now starts a shared market websocket session as soon as the selected network boots and reuses it for orderbook and position websocket consumers instead of opening duplicate sockets
 - AI chat resumes after user confirmation or cancellation by sending the local action result back to the model as a tool response
 - AI chat now routes live order cancellation, position close, TP/SL updates, and subaccount creation through the confirmation gate instead of leaving them permanently blocked
 - trade commands entered in chat now go through the DeepX agent instead of a local parser shortcut

@@ -8,6 +8,7 @@ import {
   createInitialChatMessages,
   getChatLoadingMessage,
   getChatLoadingSegments,
+  getMaxChatScrollOffset,
   getVisibleChatMessages,
 } from '../src/lib/dashboard-chat';
 
@@ -40,6 +41,9 @@ describe('dashboard chat', () => {
       'Use deepx_get_wallet_portfolio when the user asks about wallet portfolio, balance, collateral, borrowing, positions, or current account exposure.',
     );
     expect(prompt).toContain('never set confirm=true from AI chat');
+    expect(prompt).toContain(
+      'If the user wants to create a subaccount but has not provided a name, ask for the account name before calling deepx_create_subaccount.',
+    );
     expect(prompt).toContain('chooses Confirm in the below-input selector');
     expect(prompt).toContain(
       'Do not tell the user to use an Order Entry panel',
@@ -55,6 +59,9 @@ describe('dashboard chat', () => {
     );
     expect(prompt).toContain(
       'The current terminal session network is deepx_testnet; use that network for tool calls unless the user explicitly asks for a different one.',
+    );
+    expect(prompt).toContain(
+      'Return pure text only with no Markdown formatting.',
     );
   });
 
@@ -97,6 +104,31 @@ describe('dashboard chat', () => {
       { id: 'user-2', role: 'user', content: 'b' },
       { id: 'assistant-3', role: 'assistant', content: 'c' },
     ]);
+  });
+
+  test('returns older visible messages when the transcript is scrolled up', () => {
+    const messages = [
+      { id: 'assistant-1', role: 'assistant' as const, content: 'a' },
+      { id: 'user-2', role: 'user' as const, content: 'b' },
+      { id: 'assistant-3', role: 'assistant' as const, content: 'c' },
+      { id: 'user-4', role: 'user' as const, content: 'd' },
+    ];
+
+    expect(getVisibleChatMessages(messages, 2, 1)).toEqual([
+      { id: 'user-2', role: 'user', content: 'b' },
+      { id: 'assistant-3', role: 'assistant', content: 'c' },
+    ]);
+  });
+
+  test('calculates the maximum transcript scroll offset', () => {
+    const messages = [
+      { id: 'assistant-1', role: 'assistant' as const, content: 'a' },
+      { id: 'user-2', role: 'user' as const, content: 'b' },
+      { id: 'assistant-3', role: 'assistant' as const, content: 'c' },
+    ];
+
+    expect(getMaxChatScrollOffset(messages, 2)).toBe(1);
+    expect(getMaxChatScrollOffset(messages, 4)).toBe(0);
   });
 
   test('creates stable incrementing chat ids', () => {

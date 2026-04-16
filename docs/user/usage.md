@@ -37,7 +37,7 @@ Set `GEMINI_API_KEY` or `GOOGLE_API_KEY` before launch if you want live AI chat 
 - the chat agent can list all Subaccount contract subaccounts attached to the local wallet
 - the chat agent can prepare a new Subaccount contract creation request; live creation pauses for the below-input confirmation selector
 - the agent tool layer also exposes perp position-close and take-profit/stop-loss update actions
-- while the agent is generating, the chat panel shows an animated `Thinking...` indicator in the transcript and status line
+- while the agent is generating, the chat panel streams assistant text into the transcript when chunked output is available; otherwise it falls back to the animated `Thinking...` indicator
 - trade prompts such as `buy 0.001 ETH` or `sell 2 SOL at 150` go through the AI agent, which can answer in natural language and stage a live action when appropriate
 - when the agent stages an order, you still confirm or cancel it in the selector below the input bar; if the session wallet is already unlocked, submission reuses that passphrase
 - when the AI calls a live-capable order, cancel, position, TP/SL, or subaccount tool, the agent pauses until you choose `Confirm` or `Cancel` below the input bar
@@ -58,10 +58,15 @@ Set `GEMINI_API_KEY` or `GOOGLE_API_KEY` before launch if you want live AI chat 
 - typing `/` opens the command selector immediately
 - `/candle`, `/orderbook`, and `/help` are the supported commands
 - `enter` submits input, confirms the selected pair, activates a confirmation selector action, or submits a masked passphrase prompt
-- `backspace` edits the input bar
+- `up` and `down` recall recent input unless the pair picker or a partial slash-command selector is active
+- `left` and `right` move the input cursor; use `ctrl` or `meta` with arrows to jump by word
+- `ctrl+a` and `ctrl+e` jump to the start or end of the current input
+- `backspace` deletes before the cursor and `delete` deletes at the cursor
+- `ctrl+w` deletes the previous word, `ctrl+u` clears before the cursor, and `ctrl+k` clears after it
 - `esc` skips wallet boot, clears the slash selector, cancels a pending confirmation or passphrase prompt, or exits pair selection back to the input bar
 - `up` and `down` move through the pair picker after `/candle` or `/orderbook`
-- `up` and `down` also move through the slash-command selector while it is open
+- `up` and `down` move through the slash-command selector while it is filtering partial matches; once the input is an exact slash command such as `/orderbook`, `up` and `down` return to history recall
+- `pageup` and `pagedown` scroll the chat transcript without snapping back to the newest reply
 - `left` and `right` move through the confirmation selector while a staged local order or AI tool action is pending
 - `[` and `]` change chart resolution while candle view is active
 
@@ -73,5 +78,4 @@ Set `GEMINI_API_KEY` or `GOOGLE_API_KEY` before launch if you want live AI chat 
 - pair picker after `/candle` and `/orderbook`
 - confirmation selector below the input bar for staged chat orders and AI tool actions
 - masked passphrase prompt below the input bar when a confirmed AI action needs a wallet passphrase
-- command history line above the input bar
 - persistent current network line below the input bar

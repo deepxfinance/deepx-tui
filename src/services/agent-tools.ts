@@ -104,7 +104,7 @@ export const DEEPX_AGENT_TOOL_DECLARATIONS = [
   {
     name: 'deepx_create_subaccount',
     description:
-      'Create a new Subaccount contract subaccount for the locally stored wallet. Live creation requires confirm=true and an unlocked wallet session or explicit passphrase.',
+      'Create a new Subaccount contract subaccount for the locally stored wallet. Ask the user for the account name first if it was not provided. Live creation requires confirm=true and an unlocked wallet session or explicit passphrase.',
     parametersJsonSchema: {
       type: 'object',
       additionalProperties: false,
