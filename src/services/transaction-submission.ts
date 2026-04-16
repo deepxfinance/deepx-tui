@@ -38,55 +38,55 @@ export async function submitRpcTransaction(input: {
       TRANSACTION_SUBMISSION_RPC_METHOD,
       [input.signedTx],
     )) as string;
-    // const receipt = await input.provider.waitForTransaction(
-    //   txHash,
-    //   TRANSACTION_RECEIPT_CONFIRMATIONS,
-    //   TRANSACTION_RECEIPT_TIMEOUT_MS,
-    // );
-    //
-    // if (!receipt) {
-    //   throw createRpcFailureError(
-    //     `RPC accepted transaction ${txHash}, but no receipt was available after ${TRANSACTION_RECEIPT_TIMEOUT_MS / 1000}s.`,
-    //     {
-    //       txHash,
-    //       responseBody: JSON.stringify({
-    //         txHash,
-    //         receipt: null,
-    //         timeoutMs: TRANSACTION_RECEIPT_TIMEOUT_MS,
-    //       }),
-    //     },
-    //   );
-    // }
-    //
-    // if (receipt.status === 0) {
-    //   throw createRpcFailureError(
-    //     `Transaction ${txHash} was mined in block ${receipt.blockNumber} but reverted.`,
-    //     {
-    //       txHash,
-    //       responseBody: JSON.stringify({
-    //         txHash,
-    //         blockNumber: receipt.blockNumber,
-    //         receiptStatus: receipt.status,
-    //       }),
-    //     },
-    //   );
-    // }
+    const receipt = await input.provider.waitForTransaction(
+      txHash,
+      TRANSACTION_RECEIPT_CONFIRMATIONS,
+      TRANSACTION_RECEIPT_TIMEOUT_MS,
+    );
 
-    // logNetworkResponse({
-    //   scope: 'rpc',
-    //   method: 'POST',
-    //   url: input.network.rpcUrl,
-    //   status: 200,
-    //   body: JSON.stringify({
-    //     txHash,
-    //     blockNumber: receipt.blockNumber,
-    //     receiptStatus: receipt.status,
-    //   }),
-    // });
+    if (!receipt) {
+      throw createRpcFailureError(
+        `RPC accepted transaction ${txHash}, but no receipt was available after ${TRANSACTION_RECEIPT_TIMEOUT_MS / 1000}s.`,
+        {
+          txHash,
+          responseBody: JSON.stringify({
+            txHash,
+            receipt: null,
+            timeoutMs: TRANSACTION_RECEIPT_TIMEOUT_MS,
+          }),
+        },
+      );
+    }
+
+    if (receipt.status === 0) {
+      throw createRpcFailureError(
+        `Transaction ${txHash} was mined in block ${receipt.blockNumber} but reverted.`,
+        {
+          txHash,
+          responseBody: JSON.stringify({
+            txHash,
+            blockNumber: receipt.blockNumber,
+            receiptStatus: receipt.status,
+          }),
+        },
+      );
+    }
+
+    logNetworkResponse({
+      scope: 'rpc',
+      method: 'POST',
+      url: input.network.rpcUrl,
+      status: 200,
+      body: JSON.stringify({
+        txHash,
+        blockNumber: receipt.blockNumber,
+        receiptStatus: receipt.status,
+      }),
+    });
 
     return {
       txHash,
-      receipt: '',
+      receipt,
     };
   } catch (error) {
     const message = formatRpcFailureMessage(error, {

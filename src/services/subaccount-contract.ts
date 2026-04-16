@@ -19,6 +19,10 @@ export type UserStats = {
   number_of_sub_accounts_created: bigint | number;
 };
 
+export function getSubaccountsFromUserStats(stats: UserStats) {
+  return stats.subaccounts;
+}
+
 export function getPrimarySubaccountFromUserStats(input: {
   walletAddress: string;
   subaccounts: { subaccount: string }[];
@@ -33,7 +37,7 @@ export function getPrimarySubaccountFromUserStats(input: {
   return subaccountAddress;
 }
 
-export async function resolvePrimarySubaccountAddress(input: {
+export async function fetchUserSubaccounts(input: {
   walletAddress: string;
   provider: JsonRpcProvider;
 }) {
@@ -46,8 +50,15 @@ export async function resolvePrimarySubaccountAddress(input: {
     input.walletAddress,
   )) as UserStats;
 
+  return getSubaccountsFromUserStats(stats);
+}
+
+export async function resolvePrimarySubaccountAddress(input: {
+  walletAddress: string;
+  provider: JsonRpcProvider;
+}) {
   return getPrimarySubaccountFromUserStats({
     walletAddress: input.walletAddress,
-    subaccounts: stats.subaccounts,
+    subaccounts: await fetchUserSubaccounts(input),
   });
 }

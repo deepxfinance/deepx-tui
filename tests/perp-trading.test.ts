@@ -10,7 +10,10 @@ import {
   placePerpOrderLive,
   updatePerpPositionLive,
 } from '../src/services/perp-trading';
-import { getPrimarySubaccountFromUserStats } from '../src/services/subaccount-contract';
+import {
+  getPrimarySubaccountFromUserStats,
+  getSubaccountsFromUserStats,
+} from '../src/services/subaccount-contract';
 import { installMockMarketApi } from './market-api-fixture';
 
 let restoreFetch: (() => void) | undefined;
@@ -73,6 +76,27 @@ describe('perp trading config', () => {
     ).toThrow(
       'No subaccount found for 0x1111000000000000000000000000000000001111. Create or initialize a subaccount first.',
     );
+  });
+
+  test('extracts subaccounts from fetched user stats before selecting the primary address', () => {
+    expect(
+      getSubaccountsFromUserStats({
+        subaccounts: [
+          {
+            subaccount: '0x2222000000000000000000000000000000002222',
+            name: '0x6d61696e',
+          },
+        ],
+        if_staked_quote_asset_amount: 0n,
+        number_of_sub_accounts: 1,
+        number_of_sub_accounts_created: 1,
+      }),
+    ).toEqual([
+      {
+        subaccount: '0x2222000000000000000000000000000000002222',
+        name: '0x6d61696e',
+      },
+    ]);
   });
 
   test('requires explicit confirmation for live position closes', async () => {

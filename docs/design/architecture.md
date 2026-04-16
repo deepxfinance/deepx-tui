@@ -39,7 +39,7 @@
 - trade requests entered in chat are routed through the DeepX agent so the model can decide whether to answer directly or stage a tool-driven action for local confirmation
 - live perp `place`, `cancel`, `close`, and TP/SL update flows sign locally, then broadcast the raw transaction directly through the selected network RPC
 - live spot `place` flows use the Subaccount Spot contract order functions, sign locally, then broadcast the raw transaction directly through the selected network RPC
-- live order transaction payloads resolve the wallet's primary Subaccount contract address and pass that subaccount to the trade contract; the local wallet address is only used for signing
+- live order transaction payloads fetch the wallet's Subaccount contract list over RPC, select the primary subaccount address, and pass that subaccount to the trade contract; the local wallet address is only used for signing
 - live execution requires the local encrypted wallet plus local user confirmation; the remembered session passphrase is reused when available, otherwise the shell prompts for a passphrase below the input bar
 - spot token approval and transfer workflows remain out of scope
 

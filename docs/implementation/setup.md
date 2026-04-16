@@ -39,8 +39,8 @@ bun test
 - The in-process tool layer now includes a read-only user balance helper plus dedicated perp position close and TP/SL update helpers in addition to order placement and cancellation
 - AI chat can prepare live perp and spot order details through `deepx_place_order`, but live submission pauses the agent loop and uses the local below-input Confirm/Cancel selector rather than agent-set `confirm=true`
 - The tool layer can prepare Subaccount contract creation through `deepx_create_subaccount`; live submission uses the same local confirmation gate plus an unlocked session wallet or explicit passphrase prompt
-- Live perp place, cancel, close, and TP/SL update transactions resolve the wallet's primary Subaccount contract address before populating perp contract calls
-- Live spot place transactions resolve the wallet's primary Subaccount contract address before populating spot contract calls
+- Live perp place, cancel, close, and TP/SL update transactions fetch the wallet's subaccount list over RPC, select the primary Subaccount contract address, and then populate perp contract calls
+- Live spot place transactions fetch the wallet's subaccount list over RPC, select the primary Subaccount contract address, and then populate spot contract calls
 - Market ids are network-specific: perp ids come from `/v2/market/perp/markets`, while spot ids come from `/v2/market/spot/markets` and use the bytes32 `pair` value rather than the numeric perp market id
 - The terminal now loads market metadata from the selected backend APIs on demand and caches it per network in-process for the current session
 - AI chat resumes after user confirmation or cancellation by sending the local action result back to the model as a tool response

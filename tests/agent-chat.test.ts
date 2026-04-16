@@ -3,6 +3,7 @@ import type { Content, GenerateContentParameters } from '@google/genai';
 
 import {
   buildCancelledAgentActionResult,
+  buildConfirmedAgentActionArgs,
   continueAgentChatAfterUserAction,
   type GenAiClientLike,
   requestAgentChat,
@@ -381,6 +382,76 @@ describe('agent chat service', () => {
       size: '1',
     });
     expect(calls).toHaveLength(1);
+  });
+
+  test('forces confirmed agent actions onto the CLI-selected default network', async () => {
+    const calls: GenerateContentParameters[] = [];
+    const client: GenAiClientLike = {
+      models: {
+        async generateContent(input) {
+          calls.push(input);
+
+          if (calls.length === 1) {
+            return {
+              functionCalls: [
+                {
+                  id: 'call-network',
+                  name: 'deepx_place_order',
+                  args: {
+                    network: 'deepx_devnet',
+                    pair: 'ETH-USDC',
+                    side: 'BUY',
+                    type: 'LIMIT',
+                    size: '1',
+                    price: '1000',
+                  },
+                },
+              ],
+            };
+          }
+
+          throw new Error('The model should not continue before confirmation.');
+        },
+      },
+    };
+
+    const pending = await requestAgentChatWithActions({
+      messages: [
+        { id: 'user-1', role: 'user', content: 'Submit that order now.' },
+      ],
+      context: {
+        network: 'deepx_testnet',
+        pairLabel: 'ETH-USDC',
+        priceLabel: '1000.00',
+        resolutionLabel: '15m',
+        walletUnlocked: true,
+      },
+      client,
+    });
+
+    expect(pending.kind).toBe('needs_user_action');
+    if (pending.kind !== 'needs_user_action') {
+      throw new Error('Expected pending user action.');
+    }
+
+    expect(pending.action.summaryLines).toContain('Network: deepx_testnet');
+
+    expect(
+      buildConfirmedAgentActionArgs({
+        action: pending.action,
+        defaultNetwork: 'deepx_testnet',
+        passphrase: 'secret',
+      }),
+    ).toMatchObject({
+      network: 'deepx_testnet',
+      pair: 'ETH-USDC',
+      side: 'BUY',
+      type: 'LIMIT',
+      size: '1',
+      price: '1000',
+      confirm: true,
+      passphrase: 'secret',
+    });
   });
 
   test('resumes the agent after a user cancels a pending action', async () => {

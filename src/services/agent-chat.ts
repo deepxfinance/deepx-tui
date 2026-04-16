@@ -175,16 +175,25 @@ export async function executeConfirmedAgentAction(input: {
 }) {
   return await executeDeepxAgentTool(
     input.action.toolName,
-    {
-      ...input.action.args,
-      confirm: true,
-      passphrase: input.passphrase,
-    },
+    buildConfirmedAgentActionArgs(input),
     {
       allowLiveExecution: true,
       defaultNetwork: input.defaultNetwork,
     },
   );
+}
+
+export function buildConfirmedAgentActionArgs(input: {
+  action: PendingAgentAction;
+  defaultNetwork: RuntimeNetwork;
+  passphrase?: string;
+}) {
+  return {
+    ...input.action.args,
+    network: input.defaultNetwork,
+    confirm: true,
+    passphrase: input.passphrase,
+  };
 }
 
 export function buildCancelledAgentActionResult(action: PendingAgentAction) {
@@ -407,7 +416,7 @@ function buildPendingActionSummary(
   args: Record<string, unknown>,
   defaultNetwork: RuntimeNetwork,
 ) {
-  const network = String(args.network ?? defaultNetwork);
+  const network = String(defaultNetwork);
 
   switch (toolName) {
     case 'deepx_place_order':
