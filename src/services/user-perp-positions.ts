@@ -6,6 +6,24 @@ import { padRight } from '../lib/format';
 import { logSocketEvent } from './logger';
 import type { MarketPair } from './market-catalog';
 
+const POSITIONS_WS_HEARTBEAT_MS = 30_000;
+const DEFAULT_SNAPSHOT_TIMEOUT_MS = 2_000;
+const WEBSOCKET_OPEN_STATE = 1;
+
+type AddressScope = 'subaccount' | 'wallet';
+
+type WebSocketLike = {
+  readyState: number;
+  addEventListener(type: 'open', listener: () => void): void;
+  addEventListener(
+    type: 'message',
+    listener: (event: { data?: unknown }) => void,
+  ): void;
+  addEventListener(type: 'close' | 'error', listener: () => void): void;
+  send(payload: string): void;
+  close(): void;
+};
+
 export type PerpPosition = {
   marketId: number;
   isLong: boolean;
@@ -49,7 +67,7 @@ export function useUserPerpPositions(input: {
   const [positions, setPositions] = useState<PerpPosition[]>([]);
   const walletAddress = input.walletAddress.toLowerCase();
   const enabledPairs = useMemo(
-    () => input.perpPairs.filter((pair) => pair.kind === 'perp'),
+    () => getEnabledPerpPairs(input.perpPairs),
     [input.perpPairs],
   );
 
@@ -59,9 +77,9 @@ export function useUserPerpPositions(input: {
       return;
     }
 
-    const websocket = new WebSocket(input.network.marketWsUrl);
+    const websocket = createBrowserWebSocket(input.network.marketWsUrl);
     const heartbeat = setInterval(() => {
-      if (websocket.readyState !== WebSocket.OPEN) {
+      if (websocket.readyState !== WEBSOCKET_OPEN_STATE) {
         return;
       }
 
@@ -73,27 +91,13 @@ export function useUserPerpPositions(input: {
         payload,
       });
       websocket.send(payload);
-    }, 30000);
+    }, POSITIONS_WS_HEARTBEAT_MS);
 
     websocket.addEventListener('open', () => {
-      const payload = JSON.stringify({
-        action: 'multi_subscribe',
-        markets: enabledPairs.map((pair) => ({
-          type: 'perp',
-          id: pair.marketId ?? Number(pair.pairId),
-        })),
-        subscriptions: [
-          {
-            channel: 'user_perp_positions',
-            address: input.walletAddress,
-            addressType: 'wallet',
-            status: 'open',
-          },
-        ],
-        options: {
-          compress: false,
-        },
-      });
+      const payload = buildPositionsSubscriptionPayload(
+        input.walletAddress,
+        enabledPairs,
+      );
       logSocketEvent({
         scope: 'positions-ws',
         url: input.network.marketWsUrl,
@@ -115,6 +119,7 @@ export function useUserPerpPositions(input: {
         payload,
         input.walletAddress,
         enabledPairs,
+        { addressScope: 'wallet' },
       );
       if (!update) {
         return;
@@ -160,10 +165,140 @@ export function useUserPerpPositions(input: {
   return positions;
 }
 
+export async function fetchUserPerpPositionsSnapshot(input: {
+  network: NetworkConfig;
+  walletAddress: string;
+  perpPairs: MarketPair[];
+  timeoutMs?: number;
+  createWebSocket?: (url: string) => WebSocketLike;
+}): Promise<PerpPosition[]> {
+  const walletAddress = input.walletAddress.trim().toLowerCase();
+  const enabledPairs = getEnabledPerpPairs(input.perpPairs);
+  if (!walletAddress || enabledPairs.length === 0) {
+    return [];
+  }
+
+  const expectedMarketIds = new Set(
+    enabledPairs.map((pair) => pair.marketId ?? Number(pair.pairId)),
+  );
+  const createWebSocket = input.createWebSocket ?? createBrowserWebSocket;
+
+  return await new Promise<PerpPosition[]>((resolve) => {
+    let positions: PerpPosition[] = [];
+    const receivedMarketIds = new Set<number>();
+    let settled = false;
+    const websocket = createWebSocket(input.network.marketWsUrl);
+
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearInterval(heartbeat);
+      clearTimeout(timeoutHandle);
+      try {
+        websocket.close();
+      } catch {
+        // Ignore close failures from mocked sockets.
+      }
+      resolve(positions);
+    };
+
+    const heartbeat = setInterval(() => {
+      if (websocket.readyState !== WEBSOCKET_OPEN_STATE) {
+        return;
+      }
+
+      const payload = JSON.stringify({ action: 'ping' });
+      logSocketEvent({
+        scope: 'positions-ws',
+        url: input.network.marketWsUrl,
+        event: 'send',
+        payload,
+      });
+      websocket.send(payload);
+    }, POSITIONS_WS_HEARTBEAT_MS);
+
+    const timeoutHandle = setTimeout(
+      finish,
+      input.timeoutMs ?? DEFAULT_SNAPSHOT_TIMEOUT_MS,
+    );
+
+    websocket.addEventListener('open', () => {
+      const payload = buildPositionsSubscriptionPayload(
+        input.walletAddress,
+        enabledPairs,
+      );
+      logSocketEvent({
+        scope: 'positions-ws',
+        url: input.network.marketWsUrl,
+        event: 'open',
+        payload,
+      });
+      websocket.send(payload);
+    });
+
+    websocket.addEventListener('message', (event) => {
+      const payload = String(event.data);
+      logSocketEvent({
+        scope: 'positions-ws',
+        url: input.network.marketWsUrl,
+        event: 'message',
+        payload,
+      });
+      const update = parseUserPerpPositionsMessage(
+        payload,
+        input.walletAddress,
+        enabledPairs,
+        { addressScope: 'wallet' },
+      );
+      if (!update) {
+        return;
+      }
+
+      positions = mergePerpPositions(
+        positions,
+        update.positions,
+        update.owner,
+        update.marketId,
+      );
+
+      if (update.marketId != null) {
+        receivedMarketIds.add(update.marketId);
+        if (receivedMarketIds.size >= expectedMarketIds.size) {
+          finish();
+        }
+      }
+    });
+
+    websocket.addEventListener('close', () => {
+      logSocketEvent({
+        scope: 'positions-ws',
+        url: input.network.marketWsUrl,
+        event: 'close',
+      });
+      finish();
+    });
+
+    websocket.addEventListener('error', () => {
+      logSocketEvent({
+        scope: 'positions-ws',
+        url: input.network.marketWsUrl,
+        event: 'error',
+      });
+      finish();
+    });
+  });
+}
+
 export function parseUserPerpPositionsMessage(
   rawMessage: string,
-  walletAddress: string,
+  subscribedAddress: string,
   perpPairs: MarketPair[],
+  options: {
+    addressScope?: AddressScope;
+  } = {},
 ): {
   owner: string;
   marketId?: number;
@@ -181,14 +316,19 @@ export function parseUserPerpPositionsMessage(
   }
 
   const owner = message.data.address?.toLowerCase();
-  if (!owner || owner !== walletAddress.toLowerCase()) {
+  const normalizedSubscribedAddress = subscribedAddress.toLowerCase();
+  const allowWalletScopeAddressMismatch = options.addressScope === 'wallet';
+  if (
+    !owner ||
+    (owner !== normalizedSubscribedAddress && !allowWalletScopeAddressMismatch)
+  ) {
     return null;
   }
 
   const enabledMarketIds = new Set(
-    perpPairs
-      .filter((pair) => pair.kind === 'perp')
-      .map((pair) => pair.marketId ?? Number(pair.pairId)),
+    getEnabledPerpPairs(perpPairs).map(
+      (pair) => pair.marketId ?? Number(pair.pairId),
+    ),
   );
   const items = Array.isArray(message.data.positions?.items)
     ? message.data.positions.items
@@ -302,6 +442,38 @@ export function getPositionPanelHeader() {
     'SIZE',
     7,
   )} ${padRight('ENTRY', 8)} PNL`;
+}
+
+function getEnabledPerpPairs(perpPairs: MarketPair[]) {
+  return perpPairs.filter((pair) => pair.kind === 'perp');
+}
+
+function buildPositionsSubscriptionPayload(
+  walletAddress: string,
+  enabledPairs: MarketPair[],
+) {
+  return JSON.stringify({
+    action: 'multi_subscribe',
+    markets: enabledPairs.map((pair) => ({
+      type: 'perp',
+      id: pair.marketId ?? Number(pair.pairId),
+    })),
+    subscriptions: [
+      {
+        channel: 'user_perp_positions',
+        address: walletAddress,
+        addressType: 'wallet',
+        status: 'open',
+      },
+    ],
+    options: {
+      compress: false,
+    },
+  });
+}
+
+function createBrowserWebSocket(url: string) {
+  return new WebSocket(url) as unknown as WebSocketLike;
 }
 
 function mapRawPosition(raw: unknown, perpPairs: MarketPair[]): PerpPosition {

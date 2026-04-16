@@ -100,6 +100,10 @@ describe('wallet portfolio tool', () => {
         async readWalletRecord() {
           return walletRecord;
         },
+        async fetchPerpPositions() {
+          calls.push('positions:wallet');
+          return [];
+        },
         createContracts() {
           return {
             async userStats(user) {
@@ -133,10 +137,6 @@ describe('wallet portfolio tool', () => {
                 margin_required: 0n,
               };
             },
-            async userPerpPositions(account) {
-              calls.push(`positions:${account}`);
-              return [];
-            },
             async assetPools() {
               return [];
             },
@@ -159,6 +159,7 @@ describe('wallet portfolio tool', () => {
     expect(calls).not.toContain(
       'subaccountInfo:0x1111000000000000000000000000000000001111',
     );
+    expect(calls).toContain('positions:wallet');
   });
 
   test('returns unavailable when the wallet has no contract subaccounts', async () => {
@@ -189,9 +190,6 @@ describe('wallet portfolio tool', () => {
                 collateral: 0n,
                 margin_required: 0n,
               };
-            },
-            async userPerpPositions() {
-              return [];
             },
             async assetPools() {
               return [];
@@ -247,9 +245,6 @@ describe('wallet portfolio tool', () => {
                 collateral: 0n,
                 margin_required: 0n,
               };
-            },
-            async userPerpPositions() {
-              return [];
             },
             async assetPools() {
               return [];
@@ -307,6 +302,42 @@ describe('wallet portfolio tool', () => {
       network: 'deepx_devnet',
       walletAddress: '0x1234000000000000000000000000000000005678',
       subaccountAddress: '0x1234000000000000000000000000000000005678',
+      fetchPerpPositions: async () => [
+        {
+          marketId: 3,
+          isLong: true,
+          baseAssetAmount: 500_000_000_000_000_000n,
+          entryPrice: 1_900_000_000n,
+          leverage: 0,
+          lastFundingRate: 0n,
+          isolatedMargin: 0n,
+          version: 1n,
+          unrealizedPnl: 0n,
+          realizedPnl: 0n,
+          fundingPayment: 0n,
+          owner: '0x1234000000000000000000000000000000005678',
+          takeProfit: 0n,
+          stopLoss: 0n,
+          liquidatePrice: 0n,
+        },
+        {
+          marketId: 4,
+          isLong: false,
+          baseAssetAmount: 4_000_000_000n,
+          entryPrice: 120_000_000n,
+          leverage: 0,
+          lastFundingRate: 0n,
+          isolatedMargin: 0n,
+          version: 1n,
+          unrealizedPnl: 0n,
+          realizedPnl: 0n,
+          fundingPayment: 0n,
+          owner: '0x1234000000000000000000000000000000005678',
+          takeProfit: 0n,
+          stopLoss: 0n,
+          liquidatePrice: 0n,
+        },
+      ],
       contracts: {
         async userStats() {
           return {
@@ -368,22 +399,6 @@ describe('wallet portfolio tool', () => {
                 collateral: 4_300_000_000n,
                 margin_required: 800_000_000n,
               };
-        },
-        async userPerpPositions() {
-          return [
-            {
-              market_id: 3,
-              is_long: true,
-              base_asset_amount: 500_000_000_000_000_000n,
-              entry_price: 1_900_000_000n,
-            },
-            {
-              market_id: 4,
-              is_long: false,
-              base_asset_amount: 4_000_000_000n,
-              entry_price: 120_000_000n,
-            },
-          ];
         },
         async assetPools() {
           return [

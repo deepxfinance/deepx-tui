@@ -7,6 +7,7 @@ import {
   type UserStats,
 } from './subaccount-contract';
 import { createRpcProvider } from './transaction-submission';
+import { fetchUserPerpPositionsSnapshot } from './user-perp-positions';
 import { readWalletRecord } from './wallet-store';
 
 const PERP_CONTRACT_ADDRESS = '0x000000000000000000000000000000000000044E';
@@ -561,13 +562,6 @@ type TotalCollateralAndMargin = {
   margin_required: bigint;
 };
 
-type RawPerpPosition = {
-  market_id: number;
-  is_long: boolean;
-  base_asset_amount: bigint;
-  entry_price: bigint;
-};
-
 type WalletPortfolioContracts = {
   userStats(user: string): Promise<UserStats>;
   subaccountInfo(account: string): Promise<UserSubaccountInfo>;
@@ -576,16 +570,13 @@ type WalletPortfolioContracts = {
     account: string,
     weightDirection: number,
   ): Promise<TotalCollateralAndMargin>;
-  userPerpPositions(
-    account: string,
-    marketIds: number[],
-  ): Promise<RawPerpPosition[]>;
   assetPools(lendingMarketId: number): Promise<AssetPoolState[]>;
 };
 
 type WalletPortfolioDependencies = {
   readWalletRecord?: typeof readWalletRecord;
   createContracts?: (network: RuntimeNetwork) => WalletPortfolioContracts;
+  fetchPerpPositions?: typeof fetchUserPerpPositionsSnapshot;
 };
 
 export type WalletPortfolioAsset = {
@@ -754,6 +745,7 @@ export async function getWalletPortfolioTool(
     walletAddress: walletRecord.address,
     subaccountAddress,
     contracts,
+    fetchPerpPositions: dependencies.fetchPerpPositions,
   });
 }
 
@@ -819,14 +811,18 @@ export async function fetchWalletPortfolio(input: {
   walletAddress: string;
   subaccountAddress: string;
   contracts: WalletPortfolioContracts;
+  fetchPerpPositions?: typeof fetchUserPerpPositionsSnapshot;
 }): Promise<Extract<WalletPortfolioToolResult, { status: 'success' }>> {
   const balanceTokens = NETWORK_BALANCE_TOKENS[input.network];
-  const perpMarkets = (await getNetworkMarkets(getNetworkConfig(input.network)))
-    .filter((pair) => pair.kind === 'perp')
-    .map((pair) => ({
-      marketId: pair.marketId ?? Number(pair.pairId),
-      baseDecimals: pair.baseDecimals,
-    }));
+  const perpPairs = (
+    await getNetworkMarkets(getNetworkConfig(input.network))
+  ).filter((pair) => pair.kind === 'perp');
+  const perpMarkets = perpPairs.map((pair) => ({
+    marketId: pair.marketId ?? Number(pair.pairId),
+    baseDecimals: pair.baseDecimals,
+  }));
+  const fetchPerpPositions =
+    input.fetchPerpPositions ?? fetchUserPerpPositionsSnapshot;
 
   const [
     accountInfo,
@@ -847,10 +843,11 @@ export async function fetchWalletPortfolio(input: {
     ),
     input.contracts.getOraclePriceAll(),
     input.contracts.assetPools(LENDING_MARKET_ID),
-    input.contracts.userPerpPositions(
-      input.subaccountAddress,
-      perpMarkets.map((pair) => pair.marketId),
-    ),
+    fetchPerpPositions({
+      network: getNetworkConfig(input.network),
+      walletAddress: input.walletAddress,
+      perpPairs,
+    }),
   ]);
 
   const oraclePriceBySymbol = new Map(
@@ -928,31 +925,35 @@ export async function fetchWalletPortfolio(input: {
   );
   const summarizedPositions = positions
     .map((position) => {
-      const pair = marketPairFor(position.market_id);
-      const currentPriceRaw =
-        oraclePriceBySymbol.get(marketSymbolFor(position.market_id)) ?? 0n;
-      const market = perpMarkets.find(
-        (candidate) => candidate.marketId === position.market_id,
+      const pair = perpPairs.find(
+        (candidate) =>
+          (candidate.marketId ?? Number(candidate.pairId)) ===
+          position.marketId,
       );
-      if (!market || !pair || position.base_asset_amount === 0n) {
+      const market = perpMarkets.find(
+        (candidate) => candidate.marketId === position.marketId,
+      );
+      const currentPriceRaw =
+        oraclePriceBySymbol.get(pair?.baseSymbol.toUpperCase() ?? '') ?? 0n;
+      if (!market || !pair || position.baseAssetAmount === 0n) {
         return null;
       }
 
       let pnlRaw = multiplyAmountByPriceDifference(
-        position.base_asset_amount,
+        position.baseAssetAmount,
         market.baseDecimals,
-        currentPriceRaw - position.entry_price,
+        currentPriceRaw - position.entryPrice,
       );
-      if (!position.is_long) {
+      if (!position.isLong) {
         pnlRaw *= -1n;
       }
 
       return {
-        marketId: position.market_id,
-        pair,
-        side: position.is_long ? 'LONG' : 'SHORT',
-        size: formatUnits(position.base_asset_amount, market.baseDecimals),
-        entryPrice: formatUnits(position.entry_price, USD_DECIMALS),
+        marketId: position.marketId,
+        pair: pair.label,
+        side: position.isLong ? ('LONG' as const) : ('SHORT' as const),
+        size: formatUnits(position.baseAssetAmount, market.baseDecimals),
+        entryPrice: formatUnits(position.entryPrice, USD_DECIMALS),
         markPrice: formatUnits(currentPriceRaw, USD_DECIMALS),
         unrealizedPnl: formatUnits(pnlRaw, USD_DECIMALS),
         unrealizedPnlDisplay: formatUsdDisplay(pnlRaw),
@@ -1062,11 +1063,6 @@ function createWalletPortfolioContracts(
         account,
         weightDirection,
       ) as Promise<TotalCollateralAndMargin>;
-    },
-    userPerpPositions(account, marketIds) {
-      return perpContract.userPerpPositions(account, marketIds) as Promise<
-        RawPerpPosition[]
-      >;
     },
     assetPools(lendingMarketId) {
       return lendingContract.assetPools(lendingMarketId) as Promise<
@@ -1203,28 +1199,6 @@ function buildSubaccountsSummary(input: {
     `Total created: ${input.numberOfSubaccountsCreated}.`,
     rows,
   ].join('\n');
-}
-
-function marketSymbolFor(marketId: number) {
-  switch (marketId) {
-    case 3:
-      return 'ETH';
-    case 4:
-      return 'SOL';
-    default:
-      return '';
-  }
-}
-
-function marketPairFor(marketId: number) {
-  switch (marketId) {
-    case 3:
-      return 'ETH-USDC';
-    case 4:
-      return 'SOL-USDC';
-    default:
-      return '';
-  }
 }
 
 export const getUserBalanceTool = getWalletPortfolioTool;

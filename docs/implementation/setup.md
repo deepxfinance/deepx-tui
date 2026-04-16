@@ -35,6 +35,7 @@ bun test
 - Successful unlock keeps the passphrase in process memory for explicit execution workflows in the same session
 - The AI chat panel uses `@google/genai` directly and accepts either `GEMINI_API_KEY` or `GOOGLE_API_KEY`
 - The current agent model target is `gemini-3-flash-preview`
+- The chat system instruction requires pure text replies with no Markdown formatting
 - DeepX tool calls now stay in-process instead of routing through MCP
 - The in-process market tool layer now includes `deepx_get_market_price_info` for latest price and 24h change lookups on supported pairs
 - The in-process tool layer now includes a read-only wallet portfolio helper plus dedicated perp position close and TP/SL update helpers in addition to order placement and cancellation

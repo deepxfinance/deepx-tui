@@ -58,7 +58,11 @@ Set `GEMINI_API_KEY` or `GOOGLE_API_KEY` before launch if you want live AI chat 
 - typing `/` opens the command selector immediately
 - `/candle`, `/orderbook`, and `/help` are the supported commands
 - `enter` submits input, confirms the selected pair, activates a confirmation selector action, or submits a masked passphrase prompt
-- `backspace` edits the input bar
+- `up` and `down` recall recent input when no selector is active
+- `left` and `right` move the input cursor; use `ctrl` or `meta` with arrows to jump by word
+- `ctrl+a` and `ctrl+e` jump to the start or end of the current input
+- `backspace` deletes before the cursor and `delete` deletes at the cursor
+- `ctrl+w` deletes the previous word, `ctrl+u` clears before the cursor, and `ctrl+k` clears after it
 - `esc` skips wallet boot, clears the slash selector, cancels a pending confirmation or passphrase prompt, or exits pair selection back to the input bar
 - `up` and `down` move through the pair picker after `/candle` or `/orderbook`
 - `up` and `down` also move through the slash-command selector while it is open

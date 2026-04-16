@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { parseUnits } from 'ethers';
 
+import { getNetworkConfig } from '../src/config/networks';
 import {
   buildPositionPanelRows,
+  fetchUserPerpPositionsSnapshot,
   mergePerpPositions,
   type PerpPosition,
   parseUserPerpPositionsMessage,
@@ -64,7 +66,7 @@ describe('parseUserPerpPositionsMessage', () => {
     expect(parsed?.positions[0]?.fundingPayment).toBe(parseUnits('-1.25', 6));
   });
 
-  test('ignores other addresses and zero-size payload items', () => {
+  test('ignores mismatched subaccount addresses and zero-size payload items', () => {
     const parsed = parseUserPerpPositionsMessage(
       JSON.stringify({
         channel: 'user_perp_positions',
@@ -96,6 +98,38 @@ describe('parseUserPerpPositionsMessage', () => {
     expect(parsed).toBeNull();
     expect(zeroSized?.positions).toEqual([]);
   });
+
+  test('accepts wallet-scoped payloads for subaccount owners', () => {
+    const subaccountAddress = '0xabcd00000000000000000000000000000000abcd';
+    const parsed = parseUserPerpPositionsMessage(
+      JSON.stringify({
+        channel: 'user_perp_positions',
+        market: { id: 3 },
+        data: {
+          address: subaccountAddress,
+          positions: {
+            items: [
+              {
+                market_id: 3,
+                is_long: true,
+                base_asset_amount: '0.5',
+                entry_price: '1800',
+                leverage: 5,
+                owner: subaccountAddress,
+              },
+            ],
+          },
+        },
+      }),
+      walletAddress,
+      perpPairs,
+      { addressScope: 'wallet' },
+    );
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.owner).toBe(subaccountAddress);
+    expect(parsed?.positions[0]?.owner).toBe(subaccountAddress);
+  });
 });
 
 describe('mergePerpPositions', () => {
@@ -115,6 +149,100 @@ describe('mergePerpPositions', () => {
       merged.find((position) => position.marketId === 3)?.unrealizedPnl,
     ).toBe(parseUnits('8', 6));
     expect(merged.find((position) => position.marketId === 4)).toBeDefined();
+  });
+
+  test('clears only the matching market for a wallet-scoped subaccount snapshot', () => {
+    const subaccountAddress = '0xabcd00000000000000000000000000000000abcd';
+    const existing = [
+      createPosition({
+        marketId: 3,
+        owner: subaccountAddress,
+        unrealizedPnl: '5',
+      }),
+      createPosition({
+        marketId: 4,
+        owner: subaccountAddress,
+        unrealizedPnl: '2',
+      }),
+    ];
+
+    const merged = mergePerpPositions(existing, [], subaccountAddress, 3);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.marketId).toBe(4);
+    expect(merged[0]?.owner).toBe(subaccountAddress);
+  });
+});
+
+describe('fetchUserPerpPositionsSnapshot', () => {
+  test('collects wallet-scoped market snapshots over websocket', async () => {
+    const sockets: MockWebSocket[] = [];
+    const fetchPromise = fetchUserPerpPositionsSnapshot({
+      network: getNetworkConfig('devnet'),
+      walletAddress,
+      perpPairs,
+      timeoutMs: 100,
+      createWebSocket(url) {
+        const socket = new MockWebSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    const socket = sockets[0];
+    if (!socket) {
+      throw new Error('Expected websocket to be created');
+    }
+
+    socket.open();
+    expect(JSON.parse(socket.sent[0] ?? '{}')).toMatchObject({
+      action: 'multi_subscribe',
+      subscriptions: [
+        {
+          channel: 'user_perp_positions',
+          address: walletAddress,
+          addressType: 'wallet',
+          status: 'open',
+        },
+      ],
+    });
+
+    socket.message({
+      channel: 'user_perp_positions',
+      market: { id: 3 },
+      data: {
+        address: '0xabcd00000000000000000000000000000000abcd',
+        positions: {
+          items: [
+            {
+              market_id: 3,
+              is_long: true,
+              base_asset_amount: '0.5',
+              entry_price: '1800',
+              leverage: 5,
+              owner: '0xabcd00000000000000000000000000000000abcd',
+            },
+          ],
+        },
+      },
+    });
+    socket.message({
+      channel: 'user_perp_positions',
+      market: { id: 4 },
+      data: {
+        address: '0xabcd00000000000000000000000000000000abcd',
+        positions: { items: [] },
+      },
+    });
+
+    const positions = await fetchPromise;
+
+    expect(positions).toHaveLength(1);
+    expect(positions[0]).toMatchObject({
+      marketId: 3,
+      owner: '0xabcd00000000000000000000000000000000abcd',
+      isLong: true,
+    });
   });
 });
 
@@ -200,4 +328,51 @@ function getBaseDecimals(marketId: number) {
   return (
     perpPairs.find((pair) => pair.marketId === marketId)?.baseDecimals ?? 18
   );
+}
+
+class MockWebSocket {
+  readyState = 0;
+  sent: string[] = [];
+  private readonly listeners: Record<
+    string,
+    Array<(event?: { data?: unknown }) => void>
+  > = {
+    open: [],
+    message: [],
+    close: [],
+    error: [],
+  };
+
+  constructor(readonly url: string) {}
+
+  addEventListener(
+    type: string,
+    listener: (event?: { data?: unknown }) => void,
+  ) {
+    this.listeners[type]?.push(listener);
+  }
+
+  send(payload: string) {
+    this.sent.push(payload);
+  }
+
+  close() {
+    this.readyState = 3;
+    this.emit('close');
+  }
+
+  open() {
+    this.readyState = 1;
+    this.emit('open');
+  }
+
+  message(payload: unknown) {
+    this.emit('message', { data: JSON.stringify(payload) });
+  }
+
+  private emit(type: string, event?: { data?: unknown }) {
+    for (const listener of this.listeners[type] ?? []) {
+      listener(event);
+    }
+  }
 }

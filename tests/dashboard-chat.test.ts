@@ -56,6 +56,9 @@ describe('dashboard chat', () => {
     expect(prompt).toContain(
       'The current terminal session network is deepx_testnet; use that network for tool calls unless the user explicitly asks for a different one.',
     );
+    expect(prompt).toContain(
+      'Return pure text only with no Markdown formatting.',
+    );
   });
 
   test('maps chat history into GenAI contents', () => {

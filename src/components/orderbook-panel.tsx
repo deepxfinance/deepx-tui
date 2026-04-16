@@ -24,11 +24,17 @@ const ORDERBOOK_GROUP_TO_TRADES_GAP = 20;
 export const DEFAULT_ORDERBOOK_DEPTH = 20;
 export const DEFAULT_TRADES_DEPTH = 20;
 
-type BlinkSection = 'mid' | 'stats' | 'asks' | 'bids' | 'trades';
+type BlinkSection = 'mid' | 'stats';
 
 type BlinkFrames = Record<BlinkSection, number>;
 
 type BlinkSignatures = Record<BlinkSection, string>;
+
+type RowBlinkSection = 'asks' | 'bids' | 'trades';
+
+type RowBlinkFrames = Record<RowBlinkSection, number[]>;
+
+type RowBlinkSignatures = Record<RowBlinkSection, string[]>;
 
 type StatusSegment = {
   key: string;
@@ -96,10 +102,14 @@ export const OrderbookPanel: FC<OrderbookPanelProps> = ({
   const [blinkFrames, setBlinkFrames] = useState<BlinkFrames>(
     createEmptyBlinkFrames(),
   );
+  const [rowBlinkFrames, setRowBlinkFrames] = useState<RowBlinkFrames>(
+    createEmptyRowBlinkFrames(depth, tradesDepth),
+  );
   const rows = buildOrderBookDisplayRows(orderbook, depth);
   const tradeRows = buildTradeRows(trades, tradesDepth);
   const statusSegments = getOrderbookStatusSegments(statusFrame, isConnected);
   const previousBlinkSignaturesRef = useRef<BlinkSignatures | null>(null);
+  const previousRowBlinkSignaturesRef = useRef<RowBlinkSignatures | null>(null);
 
   useEffect(() => {
     const nextSignatures = buildOrderbookBlinkSignatures({
@@ -107,8 +117,6 @@ export const OrderbookPanel: FC<OrderbookPanelProps> = ({
       priceChange1h,
       priceChange24h,
       volume24h,
-      orderbook,
-      trades,
     });
     const previousSignatures = previousBlinkSignaturesRef.current;
 
@@ -123,14 +131,29 @@ export const OrderbookPanel: FC<OrderbookPanelProps> = ({
     }
 
     previousBlinkSignaturesRef.current = nextSignatures;
-  }, [
-    latestPrice,
-    orderbook,
-    priceChange1h,
-    priceChange24h,
-    trades,
-    volume24h,
-  ]);
+  }, [latestPrice, priceChange1h, priceChange24h, volume24h]);
+
+  useEffect(() => {
+    const nextSignatures = buildOrderbookRowBlinkSignatures({
+      rows,
+      trades: tradeRows,
+    });
+    const previousSignatures = previousRowBlinkSignaturesRef.current;
+
+    if (previousSignatures) {
+      setRowBlinkFrames((current) =>
+        mergeRowBlinkFramesForChangedItems(
+          current,
+          previousSignatures,
+          nextSignatures,
+        ),
+      );
+    } else {
+      setRowBlinkFrames(createEmptyRowBlinkFrames(depth, tradesDepth));
+    }
+
+    previousRowBlinkSignaturesRef.current = nextSignatures;
+  }, [depth, rows, tradeRows, tradesDepth]);
 
   useEffect(() => {
     if (!isConnected) {
@@ -146,22 +169,23 @@ export const OrderbookPanel: FC<OrderbookPanelProps> = ({
   }, [isConnected]);
 
   useEffect(() => {
-    if (!hasActiveBlinkFrames(blinkFrames)) {
+    if (
+      !hasActiveBlinkFrames(blinkFrames) &&
+      !hasActiveRowBlinkFrames(rowBlinkFrames)
+    ) {
       return;
     }
 
     const timer = setInterval(() => {
       setBlinkFrames((current) => decayBlinkFrames(current));
+      setRowBlinkFrames((current) => decayRowBlinkFrames(current));
     }, ORDERBOOK_DATA_BLINK_INTERVAL_MS);
 
     return () => clearInterval(timer);
-  }, [blinkFrames]);
+  }, [blinkFrames, rowBlinkFrames]);
 
   const isMidBlinking = isBlinkVisible(blinkFrames.mid);
   const isStatsBlinking = isBlinkVisible(blinkFrames.stats);
-  const areAsksBlinking = isBlinkVisible(blinkFrames.asks);
-  const areBidsBlinking = isBlinkVisible(blinkFrames.bids);
-  const areTradesBlinking = isBlinkVisible(blinkFrames.trades);
 
   return (
     <Box
@@ -221,11 +245,13 @@ export const OrderbookPanel: FC<OrderbookPanelProps> = ({
                 <Text key={buildOrderBookRowKey('bid', index)}>
                   {renderOrderBookHeatRow({
                     row,
-                    color: areBidsBlinking ? '#8FF7CA' : BUY_COLOR,
-                    backgroundColor: areBidsBlinking
+                    color: isBlinkVisible(rowBlinkFrames.bids[index])
+                      ? '#8FF7CA'
+                      : BUY_COLOR,
+                    backgroundColor: isBlinkVisible(rowBlinkFrames.bids[index])
                       ? BUY_BAR_BLINK_COLOR
                       : BUY_BAR_COLOR,
-                    bold: areBidsBlinking,
+                    bold: isBlinkVisible(rowBlinkFrames.bids[index]),
                   })}
                 </Text>
               ))}
@@ -236,11 +262,13 @@ export const OrderbookPanel: FC<OrderbookPanelProps> = ({
                 <Text key={buildOrderBookRowKey('ask', index)}>
                   {renderOrderBookHeatRow({
                     row,
-                    color: areAsksBlinking ? '#FF9A9A' : SELL_COLOR,
-                    backgroundColor: areAsksBlinking
+                    color: isBlinkVisible(rowBlinkFrames.asks[index])
+                      ? '#FF9A9A'
+                      : SELL_COLOR,
+                    backgroundColor: isBlinkVisible(rowBlinkFrames.asks[index])
                       ? SELL_BAR_BLINK_COLOR
                       : SELL_BAR_COLOR,
-                    bold: areAsksBlinking,
+                    bold: isBlinkVisible(rowBlinkFrames.asks[index]),
                   })}
                 </Text>
               ))}
@@ -264,7 +292,7 @@ export const OrderbookPanel: FC<OrderbookPanelProps> = ({
               key={buildTradeRowKey(index)}
               color={
                 row.value
-                  ? areTradesBlinking
+                  ? isBlinkVisible(rowBlinkFrames.trades[index])
                     ? row.isBuy
                       ? '#8FF7CA'
                       : '#FF9A9A'
@@ -273,7 +301,10 @@ export const OrderbookPanel: FC<OrderbookPanelProps> = ({
                       : SELL_COLOR
                   : MUTED_COLOR
               }
-              bold={Boolean(row.value) && areTradesBlinking}
+              bold={
+                Boolean(row.value) &&
+                isBlinkVisible(rowBlinkFrames.trades[index])
+              }
             >
               {row.value || ' '}
             </Text>
@@ -424,9 +455,17 @@ export function createEmptyBlinkFrames(): BlinkFrames {
   return {
     mid: 0,
     stats: 0,
-    asks: 0,
-    bids: 0,
-    trades: 0,
+  };
+}
+
+export function createEmptyRowBlinkFrames(
+  depth: number,
+  tradesDepth: number,
+): RowBlinkFrames {
+  return {
+    asks: Array.from({ length: depth }, () => 0),
+    bids: Array.from({ length: depth }, () => 0),
+    trades: Array.from({ length: tradesDepth }, () => 0),
   };
 }
 
@@ -435,11 +474,6 @@ export function buildOrderbookBlinkSignatures(input: {
   priceChange1h?: number;
   priceChange24h?: number;
   volume24h?: number;
-  orderbook: {
-    orderSellList?: OrderBookLevel[];
-    orderBuyList?: OrderBookLevel[];
-  } | null;
-  trades: TradeItem[];
 }): BlinkSignatures {
   return {
     mid: input.latestPrice,
@@ -448,28 +482,20 @@ export function buildOrderbookBlinkSignatures(input: {
       input.priceChange24h ?? '',
       input.volume24h ?? '',
     ].join('|'),
-    asks: (input.orderbook?.orderSellList ?? [])
-      .map((level) => `${level.price}:${level.qty}:${level.value}`)
-      .join('|'),
-    bids: (input.orderbook?.orderBuyList ?? [])
-      .map((level) => `${level.price}:${level.qty}:${level.value}`)
-      .join('|'),
-    trades: input.trades
-      .map((trade) =>
-        [
-          trade.id ?? '',
-          trade.price,
-          trade.qty,
-          trade.filledQty,
-          trade.amount,
-          trade.size,
-          trade.filledDirection,
-          trade.isLong,
-          trade.createdAt,
-          trade.time,
-        ].join(':'),
-      )
-      .join('|'),
+  };
+}
+
+export function buildOrderbookRowBlinkSignatures(input: {
+  rows: {
+    asks: OrderBookDisplayRow[];
+    bids: OrderBookDisplayRow[];
+  };
+  trades: Array<{ value: string; isBuy: boolean }>;
+}): RowBlinkSignatures {
+  return {
+    asks: input.rows.asks.map((row) => `${row.text}:${row.heatWidth}`),
+    bids: input.rows.bids.map((row) => `${row.text}:${row.heatWidth}`),
+    trades: input.trades.map((trade) => `${trade.value}:${trade.isBuy}`),
   };
 }
 
@@ -485,15 +511,18 @@ export function mergeBlinkFramesForChangedSections(
     stats: shouldBlinkSection(previous.stats, next.stats)
       ? ORDERBOOK_DATA_BLINK_TOTAL_FRAMES
       : current.stats,
-    asks: shouldBlinkSection(previous.asks, next.asks)
-      ? ORDERBOOK_DATA_BLINK_TOTAL_FRAMES
-      : current.asks,
-    bids: shouldBlinkSection(previous.bids, next.bids)
-      ? ORDERBOOK_DATA_BLINK_TOTAL_FRAMES
-      : current.bids,
-    trades: shouldBlinkSection(previous.trades, next.trades)
-      ? ORDERBOOK_DATA_BLINK_TOTAL_FRAMES
-      : current.trades,
+  };
+}
+
+export function mergeRowBlinkFramesForChangedItems(
+  current: RowBlinkFrames,
+  previous: RowBlinkSignatures,
+  next: RowBlinkSignatures,
+): RowBlinkFrames {
+  return {
+    asks: mergeRowFrames(current.asks, previous.asks, next.asks),
+    bids: mergeRowFrames(current.bids, previous.bids, next.bids),
+    trades: mergeRowFrames(current.trades, previous.trades, next.trades),
   };
 }
 
@@ -501,14 +530,25 @@ export function decayBlinkFrames(input: BlinkFrames): BlinkFrames {
   return {
     mid: Math.max(0, input.mid - 1),
     stats: Math.max(0, input.stats - 1),
-    asks: Math.max(0, input.asks - 1),
-    bids: Math.max(0, input.bids - 1),
-    trades: Math.max(0, input.trades - 1),
+  };
+}
+
+export function decayRowBlinkFrames(input: RowBlinkFrames): RowBlinkFrames {
+  return {
+    asks: input.asks.map(decayFrame),
+    bids: input.bids.map(decayFrame),
+    trades: input.trades.map(decayFrame),
   };
 }
 
 export function hasActiveBlinkFrames(input: BlinkFrames) {
   return Object.values(input).some((value) => value > 0);
+}
+
+export function hasActiveRowBlinkFrames(input: RowBlinkFrames) {
+  return Object.values(input).some((frames) =>
+    frames.some((value) => value > 0),
+  );
 }
 
 export function isBlinkVisible(remainingFrames: number) {
@@ -607,6 +647,24 @@ function formatTradeRow(trade: TradeItem) {
 
 function shouldBlinkSection(previous: string, next: string) {
   return previous.length > 0 && next.length > 0 && previous !== next;
+}
+
+function mergeRowFrames(
+  current: number[],
+  previous: string[],
+  next: string[],
+): number[] {
+  const nextLength = Math.max(current.length, previous.length, next.length);
+
+  return Array.from({ length: nextLength }, (_, index) =>
+    shouldBlinkSection(previous[index] ?? '', next[index] ?? '')
+      ? ORDERBOOK_DATA_BLINK_TOTAL_FRAMES
+      : (current[index] ?? 0),
+  );
+}
+
+function decayFrame(frame: number) {
+  return Math.max(0, frame - 1);
 }
 
 function getMaxOrderBookQuantity(levels: OrderBookLevel[]) {

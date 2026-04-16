@@ -18,7 +18,6 @@ export function buildHelpLines(commandName: string): string[] {
     '- opens the fullscreen market dashboard',
     '',
     'Workspace commands:',
-    '- /candle: open the live candle chart for a selected pair',
     '- /orderbook: open the live orderbook ladder for a selected pair',
     '- /help: show this help summary inside the dashboard',
     '',

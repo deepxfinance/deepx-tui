@@ -1,7 +1,7 @@
 import process from 'node:process';
 import { Box, Text, useApp, useInput } from 'ink';
 import type { FC, ReactNode } from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { CandleChart } from '../components/chart/candle-chart';
 import { OrderbookPanel } from '../components/orderbook-panel';
@@ -15,11 +15,21 @@ import {
 import {
   buildCommandPaletteItems,
   buildPairPickerItems,
+  formatHistoryLine,
   formatNetworkLine,
   formatShellComposerLine,
+  getHistoryValue,
+  getNextWordIndex,
+  getPrevWordIndex,
+  insertCharAt,
   isSlashCommandInput,
   moveSelectionIndex,
   parseShellInput,
+  removeCharAt,
+  removeLineAfter,
+  removeLineBefore,
+  removeWordAfter,
+  removeWordBefore,
   type ShellCommand,
 } from '../lib/dashboard-input';
 import { formatErrorMessage } from '../lib/error-format';
@@ -238,6 +248,16 @@ export function getTranscriptMessageSpacing(
   return 0;
 }
 
+export function getTranscriptMessageTrailingSpacing(
+  role?: ChatMessage['role'],
+) {
+  if (role === 'assistant') {
+    return 1;
+  }
+
+  return 0;
+}
+
 export const DashboardScreen: FC<DashboardScreenProps> = ({
   mode,
   network,
@@ -249,6 +269,16 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
   const [pairIndex, setPairIndex] = useState(0);
   const [resolution, setResolution] = useState('15');
   const [inputValue, setInputValue] = useState('');
+  const [inputCursorIndex, setInputCursorIndex] = useState(0);
+  const [inputHistory, setInputHistory] = useState<string[]>([]);
+  const [inputHistoryIndex, setInputHistoryIndex] = useState<number | null>(
+    null,
+  );
+  const [inputDraftValue, setInputDraftValue] = useState('');
+  const inputValueRef = useRef(inputValue);
+  const inputCursorIndexRef = useRef(inputCursorIndex);
+  const inputHistoryIndexRef = useRef(inputHistoryIndex);
+  const inputDraftValueRef = useRef(inputDraftValue);
   const [shellMode, setShellMode] = useState<ShellMode>('chat');
   const [pairPickerIndex, setPairPickerIndex] = useState(0);
   const [pendingCommand, setPendingCommand] = useState<
@@ -353,7 +383,43 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     });
   }, [commandPaletteItems]);
 
+  function setComposerValue(nextValue: string) {
+    inputValueRef.current = nextValue;
+    setInputValue(nextValue);
+  }
+
+  function setComposerCursor(nextCursor: number) {
+    const resolvedCursor = Math.max(
+      0,
+      Math.min(nextCursor, inputValueRef.current.length),
+    );
+    inputCursorIndexRef.current = resolvedCursor;
+    setInputCursorIndex(resolvedCursor);
+  }
+
+  function setComposerHistoryIndex(nextIndex: number | null) {
+    inputHistoryIndexRef.current = nextIndex;
+    setInputHistoryIndex(nextIndex);
+  }
+
+  function setComposerDraftValue(nextDraftValue: string) {
+    inputDraftValueRef.current = nextDraftValue;
+    setInputDraftValue(nextDraftValue);
+  }
+
+  function setComposerState(nextValue: string, nextCursor: number) {
+    setComposerValue(nextValue);
+    setComposerCursor(nextCursor);
+  }
+
   useInput((input, key) => {
+    const hasModifier = key.ctrl || key.meta;
+    const isBackspace =
+      key.backspace || input === '\x7f' || input === '\x08' || input === '\b';
+    const isDelete = key.delete || (hasModifier && input === 'd');
+    const composerValue = inputValueRef.current;
+    const composerCursor = inputCursorIndexRef.current;
+
     if (input === 'q' && shellMode === 'chat') {
       exit();
       return;
@@ -439,7 +505,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
           return;
         }
 
-        if (key.backspace || key.delete) {
+        if (isBackspace || isDelete) {
           setAgentActionPassphrase((value) => value.slice(0, -1));
           return;
         }
@@ -524,13 +590,100 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       return;
     }
 
-    if (key.backspace || key.delete) {
-      setInputValue((value) => value.slice(0, -1));
+    if ((hasModifier && input === 'a') || (key as { home?: boolean }).home) {
+      setInputCursorIndex(0);
+      return;
+    }
+
+    if ((hasModifier && input === 'e') || (key as { end?: boolean }).end) {
+      setComposerCursor(composerValue.length);
+      return;
+    }
+
+    if (key.upArrow) {
+      const next = getHistoryValue(
+        inputHistory,
+        inputHistoryIndexRef.current,
+        'up',
+        inputHistoryIndexRef.current === null
+          ? composerValue
+          : inputDraftValueRef.current,
+      );
+      if (inputHistoryIndexRef.current === null) {
+        setComposerDraftValue(composerValue);
+      }
+      setComposerHistoryIndex(next.nextIndex);
+      setComposerState(next.nextValue, next.nextValue.length);
+      return;
+    }
+
+    if (key.downArrow) {
+      const next = getHistoryValue(
+        inputHistory,
+        inputHistoryIndexRef.current,
+        'down',
+        inputDraftValueRef.current,
+      );
+      setComposerHistoryIndex(next.nextIndex);
+      setComposerState(next.nextValue, next.nextValue.length);
+      return;
+    }
+
+    if (key.leftArrow) {
+      setComposerCursor(
+        hasModifier
+          ? getPrevWordIndex(composerValue, composerCursor)
+          : Math.max(0, composerCursor - 1),
+      );
+      return;
+    }
+
+    if (key.rightArrow) {
+      setComposerCursor(
+        hasModifier
+          ? getNextWordIndex(composerValue, composerCursor)
+          : Math.min(composerValue.length, composerCursor + 1),
+      );
+      return;
+    }
+
+    if (hasModifier && input === 'u') {
+      const nextValue = removeLineBefore(composerValue, composerCursor);
+      setComposerState(nextValue, 0);
       return;
     }
 
     if (key.escape) {
-      setInputValue('');
+      resetInputComposer();
+      return;
+    }
+
+    if (hasModifier && input === 'k') {
+      setComposerValue(removeLineAfter(composerValue, composerCursor));
+      return;
+    }
+
+    if (hasModifier && input === 'w') {
+      const nextCursor = getPrevWordIndex(composerValue, composerCursor);
+      const nextValue = removeWordBefore(composerValue, composerCursor);
+      setComposerState(nextValue, nextCursor);
+      return;
+    }
+
+    if (isBackspace) {
+      const nextValue = removeCharAt(composerValue, composerCursor);
+      if (nextValue !== composerValue) {
+        setComposerState(nextValue, Math.max(0, composerCursor - 1));
+      }
+      return;
+    }
+
+    if (isDelete) {
+      const nextValue =
+        hasModifier || input === 'd'
+          ? removeWordAfter(composerValue, composerCursor)
+          : removeCharAt(composerValue, composerCursor, true);
+      setComposerValue(nextValue);
       return;
     }
 
@@ -544,14 +697,16 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       return;
     }
 
-    if (!key.ctrl && !key.meta && input.length > 0) {
+    if (!hasModifier && input.length > 0) {
       if (
-        inputValue.length === 0 &&
+        composerValue.length === 0 &&
         (outputView.kind === 'candle' || outputView.kind === 'orderbook')
       ) {
         setOutputView({ kind: 'empty' });
       }
-      setInputValue((value) => `${value}${input}`);
+
+      const nextValue = insertCharAt(composerValue, composerCursor, input);
+      setComposerState(nextValue, composerCursor + input.length);
     }
   });
 
@@ -566,7 +721,8 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       return;
     }
 
-    setInputValue('');
+    rememberInputHistory(inputValue);
+    resetInputComposer();
     const content = parsed.message;
     const nextMessages = appendChatMessage(chatMessages, 'user', content);
     setChatMessages(nextMessages);
@@ -653,7 +809,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
 
     const content = action === 'confirm' ? 'Confirm' : 'Cancel';
     const nextMessages = appendChatMessage(chatMessages, 'user', content);
-    setInputValue('');
+    resetInputComposer();
     setChatMessages(nextMessages);
 
     if (action === 'cancel') {
@@ -690,7 +846,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     }
 
     const userContent = action === 'confirm' ? 'Confirm' : 'Cancel';
-    setInputValue('');
+    resetInputComposer();
     setChatMessages((messages) =>
       appendChatMessage(messages, 'user', userContent),
     );
@@ -809,7 +965,8 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
   }
 
   function submitShellCommand(command: ShellCommand) {
-    setInputValue('');
+    rememberInputHistory(`/${command}`);
+    resetInputComposer();
     setCommandPaletteIndex(0);
     setChatMessages((messages) =>
       appendChatMessage(messages, 'command', `/${command}`),
@@ -826,6 +983,25 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     setPendingCommand(command);
     setPairPickerIndex(0);
     setShellMode('pair-select');
+  }
+
+  function rememberInputHistory(rawValue: string) {
+    const trimmedValue = rawValue.trim();
+    if (!trimmedValue) {
+      return;
+    }
+
+    setInputHistory((current) =>
+      current[current.length - 1] === trimmedValue
+        ? current
+        : [...current, trimmedValue],
+    );
+  }
+
+  function resetInputComposer() {
+    setComposerState('', 0);
+    setComposerHistoryIndex(null);
+    setComposerDraftValue('');
   }
 
   const frameWidth = Math.max(process.stdout.columns ?? 120, 100);
@@ -858,6 +1034,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
                 visibleChatMessages[index - 1]?.role,
                 message.role,
               )}
+              marginBottom={getTranscriptMessageTrailingSpacing(message.role)}
             >
               <Text
                 color={
@@ -931,7 +1108,10 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
         </Box>
       ) : null}
 
-      <InputSection>{formatShellComposerLine(inputValue, true)}</InputSection>
+      <Text color="gray">{formatHistoryLine(inputHistory)}</Text>
+      <InputSection>
+        {formatShellComposerLine(inputValue, inputCursorIndex, true)}
+      </InputSection>
 
       {layoutSlots.showCommandPaletteBelowInput ? (
         <Section title="Commands">

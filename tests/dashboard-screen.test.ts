@@ -6,6 +6,7 @@ import {
   getDashboardLayoutSlots,
   getInitialOutputView,
   getTranscriptMessageSpacing,
+  getTranscriptMessageTrailingSpacing,
   getWelcomeLogoFrames,
   getWorkspaceHeight,
   WELCOME_LOGO_LINES,
@@ -151,9 +152,6 @@ describe('dashboard welcome logo', () => {
       '- /help: show this help summary inside the dashboard',
     );
     expect(buildHelpLines('deepx')).toContain(
-      '- /candle: open the live candle chart for a selected pair',
-    );
-    expect(buildHelpLines('deepx')).toContain(
       '- optional debug mode writes expanded logs to a local debug file',
     );
   });
@@ -167,6 +165,12 @@ describe('dashboard welcome logo', () => {
     expect(getTranscriptMessageSpacing('user', 'assistant')).toBe(1);
     expect(getTranscriptMessageSpacing('assistant', 'user')).toBe(0);
     expect(getTranscriptMessageSpacing('assistant', 'assistant')).toBe(0);
+  });
+
+  test('adds a blank line below assistant transcript messages', () => {
+    expect(getTranscriptMessageTrailingSpacing('assistant')).toBe(1);
+    expect(getTranscriptMessageTrailingSpacing('user')).toBe(0);
+    expect(getTranscriptMessageTrailingSpacing('command')).toBe(0);
   });
 
   test('renders the slash-command selector below the input bar', () => {

@@ -5,12 +5,15 @@ import {
   buildOrderBookDisplayRows,
   buildOrderBookRowKey,
   buildOrderbookBlinkSignatures,
+  buildOrderbookRowBlinkSignatures,
   buildTradeRowKey,
   buildTradeRows,
   calculateOrderBookHeatWidth,
   createEmptyBlinkFrames,
+  createEmptyRowBlinkFrames,
   DEFAULT_ORDERBOOK_DEPTH,
   decayBlinkFrames,
+  decayRowBlinkFrames,
   formatPercentChange,
   formatVolume,
   getLiveStatusDotSegment,
@@ -18,8 +21,10 @@ import {
   getOrderbookStatusSegments,
   getTradesHeaderRow,
   hasActiveBlinkFrames,
+  hasActiveRowBlinkFrames,
   isBlinkVisible,
   mergeBlinkFramesForChangedSections,
+  mergeRowBlinkFramesForChangedItems,
 } from '../src/components/orderbook-panel';
 
 describe('orderbook panel', () => {
@@ -235,26 +240,32 @@ describe('orderbook panel', () => {
         priceChange1h: 1.2,
         priceChange24h: -3.4,
         volume24h: 5000,
-        orderbook: {
-          orderSellList: [{ price: '101', qty: '1', value: '101' }],
-          orderBuyList: [{ price: '99', qty: '2', value: '198' }],
-        },
-        trades: [
-          {
-            id: 'trade-1',
-            price: '100',
-            qty: '0.5',
-            filledDirection: 'BUY',
-            time: 123,
-          },
-        ],
       }),
     ).toEqual({
       mid: '100.25',
       stats: '1.2|-3.4|5000',
-      asks: '101:1:101',
-      bids: '99:2:198',
-      trades: 'trade-1:100:0.5::::BUY:::123',
+    });
+  });
+
+  test('builds stable row blink signatures for visible orderbook items', () => {
+    expect(
+      buildOrderbookRowBlinkSignatures({
+        rows: {
+          asks: [
+            { text: '', heatWidth: 0 },
+            { text: '101.00     1.000     101.00', heatWidth: 8 },
+          ],
+          bids: [{ text: '99.00      2.000     198.00', heatWidth: 27 }],
+        },
+        trades: [
+          { value: '11:00:00  99.50    0.450', isBuy: true },
+          { value: '', isBuy: true },
+        ],
+      }),
+    ).toEqual({
+      asks: [':0', '101.00     1.000     101.00:8'],
+      bids: ['99.00      2.000     198.00:27'],
+      trades: ['11:00:00  99.50    0.450:true', ':true'],
     });
   });
 
@@ -265,24 +276,37 @@ describe('orderbook panel', () => {
         {
           mid: '100.00',
           stats: '1|2|3',
-          asks: '101:1:101',
-          bids: '99:2:198',
-          trades: 't1',
         },
         {
           mid: '101.00',
           stats: '1|2|3',
-          asks: '102:1:102',
-          bids: '99:2:198',
-          trades: '',
         },
       ),
     ).toEqual({
       mid: 6,
       stats: 0,
-      asks: 6,
-      bids: 0,
-      trades: 0,
+    });
+  });
+
+  test('starts row blink frames only for changed non-empty items', () => {
+    expect(
+      mergeRowBlinkFramesForChangedItems(
+        createEmptyRowBlinkFrames(3, 2),
+        {
+          asks: [':0', '101:4', '102:7'],
+          bids: ['99:5', '98:2', ''],
+          trades: ['trade-1:true', 'trade-2:false'],
+        },
+        {
+          asks: [':0', '101:4', '103:8'],
+          bids: ['99:5', '97:2', ''],
+          trades: ['trade-1:true', ''],
+        },
+      ),
+    ).toEqual({
+      asks: [0, 0, 6],
+      bids: [0, 6, 0],
+      trades: [0, 0],
     });
   });
 
@@ -291,25 +315,37 @@ describe('orderbook panel', () => {
       decayBlinkFrames({
         mid: 2,
         stats: 1,
-        asks: 0,
-        bids: 3,
-        trades: 4,
       }),
     ).toEqual({
       mid: 1,
       stats: 0,
-      asks: 0,
-      bids: 2,
-      trades: 3,
     });
     expect(hasActiveBlinkFrames(createEmptyBlinkFrames())).toBe(false);
     expect(
       hasActiveBlinkFrames({
-        mid: 0,
+        mid: 1,
         stats: 0,
-        asks: 0,
-        bids: 1,
-        trades: 0,
+      }),
+    ).toBe(true);
+    expect(
+      decayRowBlinkFrames({
+        asks: [2, 0],
+        bids: [1, 3],
+        trades: [4],
+      }),
+    ).toEqual({
+      asks: [1, 0],
+      bids: [0, 2],
+      trades: [3],
+    });
+    expect(hasActiveRowBlinkFrames(createEmptyRowBlinkFrames(2, 1))).toBe(
+      false,
+    );
+    expect(
+      hasActiveRowBlinkFrames({
+        asks: [0, 0],
+        bids: [0, 1],
+        trades: [0],
       }),
     ).toBe(true);
     expect(isBlinkVisible(6)).toBe(true);
