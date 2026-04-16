@@ -8,6 +8,7 @@ import {
   createInitialChatMessages,
   getChatLoadingMessage,
   getChatLoadingSegments,
+  getMaxChatScrollOffset,
   getVisibleChatMessages,
 } from '../src/lib/dashboard-chat';
 
@@ -100,6 +101,31 @@ describe('dashboard chat', () => {
       { id: 'user-2', role: 'user', content: 'b' },
       { id: 'assistant-3', role: 'assistant', content: 'c' },
     ]);
+  });
+
+  test('returns older visible messages when the transcript is scrolled up', () => {
+    const messages = [
+      { id: 'assistant-1', role: 'assistant' as const, content: 'a' },
+      { id: 'user-2', role: 'user' as const, content: 'b' },
+      { id: 'assistant-3', role: 'assistant' as const, content: 'c' },
+      { id: 'user-4', role: 'user' as const, content: 'd' },
+    ];
+
+    expect(getVisibleChatMessages(messages, 2, 1)).toEqual([
+      { id: 'user-2', role: 'user', content: 'b' },
+      { id: 'assistant-3', role: 'assistant', content: 'c' },
+    ]);
+  });
+
+  test('calculates the maximum transcript scroll offset', () => {
+    const messages = [
+      { id: 'assistant-1', role: 'assistant' as const, content: 'a' },
+      { id: 'user-2', role: 'user' as const, content: 'b' },
+      { id: 'assistant-3', role: 'assistant' as const, content: 'c' },
+    ];
+
+    expect(getMaxChatScrollOffset(messages, 2)).toBe(1);
+    expect(getMaxChatScrollOffset(messages, 4)).toBe(0);
   });
 
   test('creates stable incrementing chat ids', () => {

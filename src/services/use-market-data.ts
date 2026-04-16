@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import type { NetworkConfig } from '../config/networks';
 import {
@@ -11,13 +11,14 @@ import {
   fetchCandles,
   resolutionToTimeFrame,
 } from './deepx-api';
-import { logError, logSocketEvent } from './logger';
+import { logError } from './logger';
 import {
   getNetworkMarkets,
   getPairsByKind,
   type MarketPair,
   type PairKind,
 } from './market-catalog';
+import type { MarketWsSession } from './market-ws-session';
 
 type OverviewEntry = {
   latestPrice?: number;
@@ -69,6 +70,7 @@ type UseMarketDataState = {
 };
 
 export function useMarketData(input: {
+  marketSession: MarketWsSession;
   network: NetworkConfig;
   pairKind: PairKind;
   pairIndex: number;
@@ -123,154 +125,111 @@ export function useMarketData(input: {
   );
   const [candleError, setCandleError] = useState<string>();
   const [orderbookError, setOrderbookError] = useState<string>();
-  const [overviewWebSocketDelayMs, setOverviewWebSocketDelayMs] = useState<
-    number | undefined
-  >();
-  const [orderbookWebSocketDelayMs, setOrderbookWebSocketDelayMs] = useState<
-    number | undefined
-  >();
-  const marketStreamTokenRef = useRef(0);
+  const [websocketDelayMs, setWebsocketDelayMs] = useState<number | undefined>(
+    input.marketSession.getSnapshot().websocketDelayMs,
+  );
+
+  useEffect(() => {
+    return input.marketSession.subscribeToStatus((snapshot) => {
+      setWebsocketDelayMs(snapshot.websocketDelayMs);
+    });
+  }, [input.marketSession]);
 
   useEffect(() => {
     if (allPairs.length === 0) {
       return;
     }
 
-    const websocket = new WebSocket(input.network.marketWsUrl);
-    let pendingPingAt: number | null = null;
     const subscribedPairs = allPairs.map((pair) => ({
       type: pair.kind,
       name: pair.label,
     }));
-    const sendPing = () => {
-      if (websocket.readyState !== websocket.OPEN) {
-        return;
-      }
-
-      pendingPingAt = Date.now();
-      const payload = JSON.stringify({ action: 'ping' });
-      logSocketEvent({
-        scope: 'overview-ws',
-        url: input.network.marketWsUrl,
-        event: 'send',
-        payload,
-      });
-      websocket.send(payload);
-    };
-
-    websocket.addEventListener('open', () => {
-      setIsOverviewConnected(true);
-      const payload = JSON.stringify({
-        action: 'multi_subscribe',
-        markets: subscribedPairs,
-        subscriptions: [
-          'latest_price',
-          'price_change_1h',
-          'price_change_24h',
-          'funding_rate',
-          'open_interest',
-          'volume_stats',
-        ],
-      });
-      logSocketEvent({
-        scope: 'overview-ws',
-        url: input.network.marketWsUrl,
-        event: 'open',
-        payload,
-      });
-      websocket.send(payload);
-      sendPing();
+    const payload = JSON.stringify({
+      action: 'multi_subscribe',
+      markets: subscribedPairs,
+      subscriptions: [
+        'latest_price',
+        'price_change_1h',
+        'price_change_24h',
+        'funding_rate',
+        'open_interest',
+        'volume_stats',
+      ],
     });
 
-    websocket.addEventListener('message', (event) => {
-      logSocketEvent({
-        scope: 'overview-ws',
-        url: input.network.marketWsUrl,
-        event: 'message',
-        payload: String(event.data),
-      });
-      const result = JSON.parse(String(event.data)) as {
-        action?: string;
-        type?: string;
-        market?: { name?: string };
-        channel?: string;
-        message?: string;
-        data?: unknown;
-      };
+    const unsubscribe = input.marketSession.subscribe({
+      key: `overview:${input.network.id}:${subscribedPairs
+        .map((pair) => `${pair.type}:${pair.name}`)
+        .join('|')}`,
+      payload,
+      scope: 'overview-ws',
+      onOpen() {
+        setIsOverviewConnected(true);
+      },
+      onClose() {
+        setIsOverviewConnected(false);
+      },
+      onError() {
+        setIsOverviewConnected(false);
+      },
+      onMessage(rawMessage) {
+        const result = JSON.parse(rawMessage) as {
+          action?: string;
+          type?: string;
+          market?: { name?: string };
+          channel?: string;
+          message?: string;
+          data?: unknown;
+        };
 
-      if (isWebSocketPongMessage(result) && pendingPingAt != null) {
-        setOverviewWebSocketDelayMs(Date.now() - pendingPingAt);
-        pendingPingAt = null;
-        return;
-      }
-
-      const marketName = result.market?.name;
-      if (result.type !== 'data' || !marketName) {
-        return;
-      }
-
-      setOverview((current) => {
-        const next = { ...current };
-        const entry = { ...(next[marketName] ?? {}) };
-
-        switch (result.channel) {
-          case 'latest_price':
-            entry.latestPrice = Number(result.data);
-            break;
-          case 'price_change_1h':
-            entry.priceChange1h = Number(result.data);
-            break;
-          case 'price_change_24h':
-            entry.priceChange24h = Number(result.data);
-            break;
-          case 'funding_rate':
-            entry.fundingRate = Number(result.data);
-            break;
-          case 'open_interest':
-            entry.openInterest = String(result.data);
-            break;
-          case 'volume_stats':
-            entry.volume24h = Number(
-              (result.data as { volume_24h?: { totalVolume?: number } })
-                ?.volume_24h?.totalVolume ?? 0,
-            );
-            break;
+        if (isWebSocketPongMessage(result)) {
+          return;
         }
 
-        next[marketName] = entry;
-        return next;
-      });
-    });
+        const marketName = result.market?.name;
+        if (result.type !== 'data' || !marketName) {
+          return;
+        }
 
-    websocket.addEventListener('close', () => {
-      logSocketEvent({
-        scope: 'overview-ws',
-        url: input.network.marketWsUrl,
-        event: 'close',
-      });
-      setIsOverviewConnected(false);
-      setOverviewWebSocketDelayMs(undefined);
-      pendingPingAt = null;
-    });
+        setOverview((current) => {
+          const next = { ...current };
+          const entry = { ...(next[marketName] ?? {}) };
 
-    websocket.addEventListener('error', () => {
-      logSocketEvent({
-        scope: 'overview-ws',
-        url: input.network.marketWsUrl,
-        event: 'error',
-      });
-      setIsOverviewConnected(false);
-      setOverviewWebSocketDelayMs(undefined);
-      pendingPingAt = null;
-    });
+          switch (result.channel) {
+            case 'latest_price':
+              entry.latestPrice = Number(result.data);
+              break;
+            case 'price_change_1h':
+              entry.priceChange1h = Number(result.data);
+              break;
+            case 'price_change_24h':
+              entry.priceChange24h = Number(result.data);
+              break;
+            case 'funding_rate':
+              entry.fundingRate = Number(result.data);
+              break;
+            case 'open_interest':
+              entry.openInterest = String(result.data);
+              break;
+            case 'volume_stats':
+              entry.volume24h = Number(
+                (result.data as { volume_24h?: { totalVolume?: number } })
+                  ?.volume_24h?.totalVolume ?? 0,
+              );
+              break;
+          }
 
-    const heartbeat = setInterval(sendPing, 15000);
+          next[marketName] = entry;
+          return next;
+        });
+      },
+    });
 
     return () => {
-      clearInterval(heartbeat);
-      websocket.close();
+      unsubscribe();
+      setIsOverviewConnected(false);
     };
-  }, [allPairs, input.network.marketWsUrl]);
+  }, [allPairs, input.marketSession, input.network.id]);
 
   useEffect(() => {
     if (allPairs.length === 0) {
@@ -311,203 +270,149 @@ export function useMarketData(input: {
       return;
     }
 
-    const marketStreamToken = marketStreamTokenRef.current + 1;
-    marketStreamTokenRef.current = marketStreamToken;
-    const isActiveMarketStream = () =>
-      marketStreamTokenRef.current === marketStreamToken;
-
     setOrderbook(null);
     setTrades([]);
     setOrderbookError(undefined);
     setIsCandleStreamConnected(false);
     setLastCandleUpdateAt(null);
 
-    const websocket = new WebSocket(input.network.marketWsUrl);
-    let pendingPingAt: number | null = null;
-    const sendPing = () => {
-      if (websocket.readyState !== websocket.OPEN) {
-        return;
-      }
-
-      pendingPingAt = Date.now();
-      const payload = JSON.stringify({ action: 'ping' });
-      logSocketEvent({
-        scope: 'market-ws',
-        url: input.network.marketWsUrl,
-        event: 'send',
-        payload,
-      });
-      websocket.send(payload);
-    };
-
-    websocket.addEventListener('open', () => {
-      if (!isActiveMarketStream()) {
-        return;
-      }
-
-      setIsOrderbookConnected(true);
-      setIsCandleStreamConnected(true);
-      const payload = JSON.stringify({
-        action: 'subscribe',
-        market: {
-          type: currentPair.kind,
-          name: currentPair.label,
-        },
-        subscriptions: [
-          { time_frame: resolutionToTimeFrame(input.resolution) },
-          'orderbook',
-          'trades',
-          'latest_price',
-          'price_change_1h',
-          'price_change_24h',
-          'volume_stats',
-        ],
-        options: {
-          compress: false,
-          orderbook_depth: 40,
-          orderbook_price_size: 0.01,
-        },
-      });
-      logSocketEvent({
-        scope: 'market-ws',
-        url: input.network.marketWsUrl,
-        event: 'open',
-        payload,
-      });
-      websocket.send(payload);
-      sendPing();
+    const payload = JSON.stringify({
+      action: 'subscribe',
+      market: {
+        type: currentPair.kind,
+        name: currentPair.label,
+      },
+      subscriptions: [
+        { time_frame: resolutionToTimeFrame(input.resolution) },
+        'orderbook',
+        'trades',
+        'latest_price',
+        'price_change_1h',
+        'price_change_24h',
+        'volume_stats',
+      ],
+      options: {
+        compress: false,
+        orderbook_depth: 40,
+        orderbook_price_size: 0.01,
+      },
     });
 
-    websocket.addEventListener('message', (event) => {
-      logSocketEvent({
-        scope: 'market-ws',
-        url: input.network.marketWsUrl,
-        event: 'message',
-        payload: String(event.data),
-      });
-      const result = JSON.parse(String(event.data)) as {
-        action?: string;
-        type?: string;
-        channel?: string;
-        market?: { name?: string };
-        interval?: string;
-        message?: string;
-        data?: unknown;
-      };
+    const unsubscribe = input.marketSession.subscribe({
+      key: `market:${input.network.id}:${currentPair.kind}:${currentPair.label}:${input.resolution}`,
+      payload,
+      scope: 'market-ws',
+      onOpen() {
+        setIsOrderbookConnected(true);
+        setIsCandleStreamConnected(true);
+      },
+      onClose() {
+        setIsOrderbookConnected(false);
+        setIsCandleStreamConnected(false);
+      },
+      onError() {
+        setIsOrderbookConnected(false);
+        setIsCandleStreamConnected(false);
+        setOrderbookError('Orderbook stream unavailable');
+      },
+      onMessage(rawMessage) {
+        const result = JSON.parse(rawMessage) as {
+          action?: string;
+          type?: string;
+          channel?: string;
+          market?: { name?: string };
+          interval?: string;
+          message?: string;
+          data?: unknown;
+        };
 
-      if (isWebSocketPongMessage(result) && pendingPingAt != null) {
-        setOrderbookWebSocketDelayMs(Date.now() - pendingPingAt);
-        pendingPingAt = null;
-        return;
-      }
-
-      if (!isSelectedMarketMessage(result, currentPair.label)) {
-        return;
-      }
-
-      if (result.type === 'error') {
-        setOrderbookError(result.message ?? 'Orderbook stream error');
-        return;
-      }
-
-      if (result.type === 'data' && result.channel === 'orderbook') {
-        setOrderbook(result.data as OrderBookState);
-        return;
-      }
-
-      if (result.type === 'data' && result.channel === 'trades') {
-        const rawTrades =
-          (result.data as { items?: TradeItem[] } | TradeItem[]) ?? [];
-        const tradeItems = Array.isArray(rawTrades)
-          ? rawTrades
-          : (rawTrades.items ?? []);
-        setTrades((current) => mergeTrades(current, tradeItems));
-        return;
-      }
-
-      if (
-        result.type === 'data' &&
-        (result.channel === 'latest_price' ||
-          result.channel === 'price_change_1h' ||
-          result.channel === 'price_change_24h' ||
-          result.channel === 'volume_stats')
-      ) {
-        setOverview((current) => {
-          const next = { ...current };
-          const entry = { ...(next[currentPair.label] ?? {}) };
-
-          switch (result.channel) {
-            case 'latest_price':
-              entry.latestPrice = Number(result.data);
-              break;
-            case 'price_change_1h':
-              entry.priceChange1h = Number(result.data);
-              break;
-            case 'price_change_24h':
-              entry.priceChange24h = Number(result.data);
-              break;
-            case 'volume_stats':
-              entry.volume24h = Number(
-                (result.data as { volume_24h?: { totalVolume?: number } })
-                  ?.volume_24h?.totalVolume ?? 0,
-              );
-              break;
-          }
-
-          next[currentPair.label] = entry;
-          return next;
-        });
-        return;
-      }
-
-      if (
-        result.type === 'data' &&
-        typeof result.channel === 'string' &&
-        result.channel.startsWith('candles')
-      ) {
-        const candleBars = normalizeStreamCandles(result.data);
-        if (candleBars.length > 0) {
-          setLastCandleUpdateAt(Date.now());
-          setCandles((current) => candleBars.reduce(mergeCandles, current));
+        if (isWebSocketPongMessage(result)) {
+          return;
         }
-      }
-    });
 
-    websocket.addEventListener('close', () => {
-      logSocketEvent({
-        scope: 'market-ws',
-        url: input.network.marketWsUrl,
-        event: 'close',
-      });
-      setIsOrderbookConnected(false);
-      setIsCandleStreamConnected(false);
-      setOrderbookWebSocketDelayMs(undefined);
-      pendingPingAt = null;
-    });
+        if (!isSelectedMarketMessage(result, currentPair.label)) {
+          return;
+        }
 
-    websocket.addEventListener('error', () => {
-      logSocketEvent({
-        scope: 'market-ws',
-        url: input.network.marketWsUrl,
-        event: 'error',
-      });
-      setIsOrderbookConnected(false);
-      setIsCandleStreamConnected(false);
-      setOrderbookError('Orderbook stream unavailable');
-      setOrderbookWebSocketDelayMs(undefined);
-      pendingPingAt = null;
-    });
+        if (result.type === 'error') {
+          setOrderbookError(result.message ?? 'Orderbook stream error');
+          return;
+        }
 
-    const heartbeat = setInterval(sendPing, 15000);
+        if (result.type === 'data' && result.channel === 'orderbook') {
+          setOrderbook(result.data as OrderBookState);
+          return;
+        }
+
+        if (result.type === 'data' && result.channel === 'trades') {
+          const rawTrades =
+            (result.data as { items?: TradeItem[] } | TradeItem[]) ?? [];
+          const tradeItems = Array.isArray(rawTrades)
+            ? rawTrades
+            : (rawTrades.items ?? []);
+          setTrades((current) => mergeTrades(current, tradeItems));
+          return;
+        }
+
+        if (
+          result.type === 'data' &&
+          (result.channel === 'latest_price' ||
+            result.channel === 'price_change_1h' ||
+            result.channel === 'price_change_24h' ||
+            result.channel === 'volume_stats')
+        ) {
+          setOverview((current) => {
+            const next = { ...current };
+            const entry = { ...(next[currentPair.label] ?? {}) };
+
+            switch (result.channel) {
+              case 'latest_price':
+                entry.latestPrice = Number(result.data);
+                break;
+              case 'price_change_1h':
+                entry.priceChange1h = Number(result.data);
+                break;
+              case 'price_change_24h':
+                entry.priceChange24h = Number(result.data);
+                break;
+              case 'volume_stats':
+                entry.volume24h = Number(
+                  (result.data as { volume_24h?: { totalVolume?: number } })
+                    ?.volume_24h?.totalVolume ?? 0,
+                );
+                break;
+            }
+
+            next[currentPair.label] = entry;
+            return next;
+          });
+          return;
+        }
+
+        if (
+          result.type === 'data' &&
+          typeof result.channel === 'string' &&
+          result.channel.startsWith('candles')
+        ) {
+          const candleBars = normalizeStreamCandles(result.data);
+          if (candleBars.length > 0) {
+            setLastCandleUpdateAt(Date.now());
+            setCandles((current) => candleBars.reduce(mergeCandles, current));
+          }
+        }
+      },
+    });
 
     return () => {
-      clearInterval(heartbeat);
-      websocket.close();
+      unsubscribe();
+      setIsOrderbookConnected(false);
+      setIsCandleStreamConnected(false);
     };
   }, [
     allPairs.length,
     currentPair,
-    input.network.marketWsUrl,
+    input.marketSession,
+    input.network.id,
     input.resolution,
   ]);
 
@@ -545,8 +450,7 @@ export function useMarketData(input: {
     ),
     candleError,
     orderbookError,
-    websocketDelayMs:
-      orderbookWebSocketDelayMs ?? overviewWebSocketDelayMs ?? undefined,
+    websocketDelayMs,
   };
 }
 

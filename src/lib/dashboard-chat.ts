@@ -69,8 +69,20 @@ export function appendChatMessage(
 export function getVisibleChatMessages(
   messages: ChatMessage[],
   maxMessages: number,
+  scrollOffset = 0,
 ): ChatMessage[] {
-  return messages.slice(-Math.max(maxMessages, 1));
+  const maxVisibleMessages = Math.max(maxMessages, 1);
+  const normalizedScrollOffset = Math.max(scrollOffset, 0);
+  const endIndex = Math.max(messages.length - normalizedScrollOffset, 0);
+  const startIndex = Math.max(0, endIndex - maxVisibleMessages);
+  return messages.slice(startIndex, endIndex);
+}
+
+export function getMaxChatScrollOffset(
+  messages: ChatMessage[],
+  maxMessages: number,
+) {
+  return Math.max(0, messages.length - Math.max(maxMessages, 1));
 }
 
 export function buildChatSystemPrompt(context: ChatPromptContext): string {

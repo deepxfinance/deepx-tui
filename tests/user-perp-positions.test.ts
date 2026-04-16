@@ -3,6 +3,11 @@ import { parseUnits } from 'ethers';
 
 import { getNetworkConfig } from '../src/config/networks';
 import {
+  acquireSharedMarketWsSession,
+  releaseSharedMarketWsSession,
+  resetSharedMarketWsSessions,
+} from '../src/services/market-ws-session';
+import {
   buildPositionPanelRows,
   fetchUserPerpPositionsSnapshot,
   mergePerpPositions,
@@ -243,6 +248,193 @@ describe('fetchUserPerpPositionsSnapshot', () => {
       owner: '0xabcd00000000000000000000000000000000abcd',
       isLong: true,
     });
+  });
+
+  test('reuses the shared market session instead of opening a second socket', async () => {
+    resetSharedMarketWsSessions();
+    const sockets: MockWebSocket[] = [];
+    const session = acquireSharedMarketWsSession(getNetworkConfig('devnet'), {
+      createWebSocket(url) {
+        const socket = new MockWebSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    const socket = sockets[0];
+    if (!socket) {
+      throw new Error('Expected shared websocket to be created');
+    }
+
+    socket.open();
+    socket.sent = [];
+
+    const fetchPromise = fetchUserPerpPositionsSnapshot({
+      network: getNetworkConfig('devnet'),
+      walletAddress,
+      perpPairs,
+      createWebSocket() {
+        throw new Error('Unexpected fallback websocket creation');
+      },
+    });
+
+    expect(sockets).toHaveLength(1);
+    expect(JSON.parse(socket.sent[0] ?? '{}')).toMatchObject({
+      action: 'multi_subscribe',
+      subscriptions: [
+        {
+          channel: 'user_perp_positions',
+          address: walletAddress,
+          addressType: 'wallet',
+          status: 'open',
+        },
+      ],
+    });
+
+    socket.message({
+      channel: 'user_perp_positions',
+      market: { id: 3 },
+      data: {
+        address: '0xabcd00000000000000000000000000000000abcd',
+        positions: {
+          items: [
+            {
+              market_id: 3,
+              is_long: true,
+              base_asset_amount: '0.5',
+              entry_price: '1800',
+              leverage: 5,
+              owner: '0xabcd00000000000000000000000000000000abcd',
+            },
+          ],
+        },
+      },
+    });
+    socket.message({
+      channel: 'user_perp_positions',
+      market: { id: 4 },
+      data: {
+        address: '0xabcd00000000000000000000000000000000abcd',
+        positions: { items: [] },
+      },
+    });
+
+    const positions = await fetchPromise;
+
+    expect(positions).toHaveLength(1);
+    expect(positions[0]).toMatchObject({
+      marketId: 3,
+      owner: '0xabcd00000000000000000000000000000000abcd',
+      isLong: true,
+    });
+
+    releaseSharedMarketWsSession(session);
+    resetSharedMarketWsSessions();
+  });
+
+  test('forces a fresh subscribe for snapshots even when a live positions consumer is already active', async () => {
+    resetSharedMarketWsSessions();
+    const sockets: MockWebSocket[] = [];
+    const session = acquireSharedMarketWsSession(getNetworkConfig('devnet'), {
+      createWebSocket(url) {
+        const socket = new MockWebSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    const socket = sockets[0];
+    if (!socket) {
+      throw new Error('Expected shared websocket to be created');
+    }
+
+    socket.open();
+    socket.sent = [];
+
+    const unsubscribeLivePositions = session.subscribe({
+      key: `positions:${walletAddress.toLowerCase()}:3,4`,
+      payload: JSON.stringify({
+        action: 'multi_subscribe',
+        markets: [
+          { type: 'perp', id: 3 },
+          { type: 'perp', id: 4 },
+        ],
+        subscriptions: [
+          {
+            channel: 'user_perp_positions',
+            address: walletAddress,
+            addressType: 'wallet',
+            status: 'open',
+          },
+        ],
+        options: {
+          compress: false,
+        },
+      }),
+      scope: 'positions-ws',
+      onMessage() {},
+    });
+
+    expect(socket.sent).toHaveLength(1);
+    socket.sent = [];
+
+    const fetchPromise = fetchUserPerpPositionsSnapshot({
+      network: getNetworkConfig('devnet'),
+      walletAddress,
+      perpPairs,
+      createWebSocket() {
+        throw new Error('Unexpected fallback websocket creation');
+      },
+    });
+
+    expect(socket.sent).toHaveLength(1);
+    expect(JSON.parse(socket.sent[0] ?? '{}')).toMatchObject({
+      action: 'multi_subscribe',
+      subscriptions: [
+        {
+          channel: 'user_perp_positions',
+          address: walletAddress,
+          addressType: 'wallet',
+          status: 'open',
+        },
+      ],
+    });
+
+    socket.message({
+      channel: 'user_perp_positions',
+      market: { id: 3 },
+      data: {
+        address: '0xabcd00000000000000000000000000000000abcd',
+        positions: {
+          items: [
+            {
+              market_id: 3,
+              is_long: true,
+              base_asset_amount: '0.5',
+              entry_price: '1800',
+              leverage: 5,
+              owner: '0xabcd00000000000000000000000000000000abcd',
+            },
+          ],
+        },
+      },
+    });
+    socket.message({
+      channel: 'user_perp_positions',
+      market: { id: 4 },
+      data: {
+        address: '0xabcd00000000000000000000000000000000abcd',
+        positions: { items: [] },
+      },
+    });
+
+    const positions = await fetchPromise;
+
+    expect(positions).toHaveLength(1);
+
+    unsubscribeLivePositions();
+    releaseSharedMarketWsSession(session);
+    resetSharedMarketWsSessions();
   });
 });
 

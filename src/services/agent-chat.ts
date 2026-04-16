@@ -93,6 +93,9 @@ export type GenAiClientLike = {
     generateContent(
       input: GenerateContentParameters,
     ): Promise<GenAiResponseLike>;
+    generateContentStream?(
+      input: GenerateContentParameters,
+    ): Promise<AsyncIterable<GenAiResponseLike>>;
   };
 };
 
@@ -100,6 +103,7 @@ export async function requestAgentChat(input: {
   messages: ChatMessage[];
   context: AgentContext;
   client?: GenAiClientLike;
+  onText?: (text: string) => void;
 }): Promise<string> {
   const result = await requestAgentChatWithActions(input);
   if (result.kind === 'needs_user_action') {
@@ -113,6 +117,7 @@ export async function requestAgentChatWithActions(input: {
   messages: ChatMessage[];
   context: AgentContext;
   client?: GenAiClientLike;
+  onText?: (text: string) => void;
 }): Promise<AgentChatTurnResult> {
   if (!input.messages.some((message) => message.role === 'user')) {
     throw new Error('No user prompt available for the DeepX agent.');
@@ -129,6 +134,7 @@ export async function requestAgentChatWithActions(input: {
     contents,
     stagedOrders: [],
     startingRound: 0,
+    onText: input.onText,
   });
 }
 
@@ -136,6 +142,7 @@ export async function continueAgentChatAfterUserAction(input: {
   continuation: AgentContinuation;
   actionResult: unknown;
   client?: GenAiClientLike;
+  onText?: (text: string) => void;
 }): Promise<AgentChatTurnResult> {
   const client = input.client ?? createGenAiClient();
   const { continuation } = input;
@@ -165,6 +172,7 @@ export async function continueAgentChatAfterUserAction(input: {
     contents,
     stagedOrders: continuation.stagedOrders,
     startingRound: continuation.round + 1,
+    onText: input.onText,
   });
 }
 
@@ -211,21 +219,28 @@ async function runAgentToolLoop(input: {
   contents: Content[];
   stagedOrders: AgentStagedOrder[];
   startingRound: number;
+  onText?: (text: string) => void;
 }): Promise<AgentChatTurnResult> {
   let contents = input.contents;
   const stagedOrders = input.stagedOrders;
 
   for (let round = input.startingRound; round < MAX_TOOL_ROUNDS; round += 1) {
-    const response = await input.client.models.generateContent({
-      model: GENAI_MODEL,
-      contents,
-      config: {
-        systemInstruction: input.systemInstruction,
-        tools: [
-          {
-            functionDeclarations: DEEPX_AGENT_TOOL_DECLARATIONS,
-          },
-        ],
+    input.onText?.('');
+
+    const response = await requestAgentModelResponse({
+      client: input.client,
+      onText: input.onText,
+      request: {
+        model: GENAI_MODEL,
+        contents,
+        config: {
+          systemInstruction: input.systemInstruction,
+          tools: [
+            {
+              functionDeclarations: DEEPX_AGENT_TOOL_DECLARATIONS,
+            },
+          ],
+        },
       },
     });
 
@@ -312,6 +327,62 @@ export function normalizeAgentText(text?: string) {
   return (text ?? '').trim();
 }
 
+async function requestAgentModelResponse(input: {
+  client: GenAiClientLike;
+  request: GenerateContentParameters;
+  onText?: (text: string) => void;
+}): Promise<GenAiResponseLike> {
+  const generateContentStream = input.client.models.generateContentStream;
+  if (!generateContentStream) {
+    return await input.client.models.generateContent(input.request);
+  }
+
+  const stream = await generateContentStream(input.request);
+  let text = '';
+  const functionCallParts = new Map<string, Part>();
+
+  for await (const chunk of stream) {
+    text = mergeStreamText(text, chunk.text);
+    if (text) {
+      input.onText?.(text);
+    }
+
+    for (const [index, part] of getFunctionCallParts(chunk).entries()) {
+      const call = part.functionCall;
+      if (!call) {
+        continue;
+      }
+
+      functionCallParts.set(getFunctionCallKey(call, index), {
+        functionCall: {
+          id: call.id,
+          name: call.name,
+          args: isRecord(call.args) ? call.args : {},
+        },
+        thoughtSignature: part.thoughtSignature,
+      });
+    }
+  }
+
+  return {
+    text,
+    candidates:
+      functionCallParts.size > 0
+        ? [
+            {
+              content: {
+                role: 'model',
+                parts: [...functionCallParts.values()],
+              },
+            },
+          ]
+        : undefined,
+    functionCalls: [...functionCallParts.values()]
+      .map((part) => part.functionCall)
+      .filter((call): call is FunctionCall => call !== undefined),
+  };
+}
+
 function buildModelToolCallContent(
   response: GenAiResponseLike,
   functionCalls: Array<Required<Pick<FunctionCall, 'name'>> & FunctionCall>,
@@ -361,6 +432,35 @@ function buildFunctionCallPart(call: FunctionCall): Part {
       args: call.args,
     },
   };
+}
+
+function mergeStreamText(currentText: string, nextText?: string) {
+  const normalizedNextText = nextText ?? '';
+  if (!normalizedNextText) {
+    return currentText;
+  }
+
+  if (!currentText || normalizedNextText.startsWith(currentText)) {
+    return normalizedNextText;
+  }
+
+  if (currentText.endsWith(normalizedNextText)) {
+    return currentText;
+  }
+
+  return `${currentText}${normalizedNextText}`;
+}
+
+function getFunctionCallParts(response: GenAiResponseLike): Part[] {
+  return (
+    response.candidates?.[0]?.content?.parts?.filter((part) =>
+      Boolean(part.functionCall),
+    ) ?? []
+  );
+}
+
+function getFunctionCallKey(call: FunctionCall, index: number) {
+  return call.id?.trim() || `${call.name?.trim() ?? 'tool-call'}-${index}`;
 }
 
 function shouldRequireUserAction(

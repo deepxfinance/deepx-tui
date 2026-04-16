@@ -25,6 +25,7 @@ export function buildHelpLines(commandName: string): string[] {
     '- q or Esc: quit',
     '- [ / ]: change chart resolution while candle view is open',
     '- Up / Down: move through slash-command and pair menus',
+    '- PageUp / PageDown: scroll the chat transcript without snapping back',
     '- Enter: confirm the active command, pair, or chat input',
   ];
 }

@@ -10,6 +10,7 @@ import {
   appendChatMessage,
   type ChatMessage,
   getChatLoadingSegments,
+  getMaxChatScrollOffset,
   getVisibleChatMessages,
 } from '../lib/dashboard-chat';
 import {
@@ -50,12 +51,14 @@ import {
 } from '../services/chat-trade-intent';
 import { logError, logInfo } from '../services/logger';
 import type { MarketPair, PairKind } from '../services/market-catalog';
+import type { MarketWsSession } from '../services/market-ws-session';
 import { placeOrderTool } from '../services/order-tools';
 import { useMarketData } from '../services/use-market-data';
 import { getRememberedWalletPassphrase } from '../services/wallet-session';
 import { buildHelpLines, HelpContent } from './help-screen';
 
 type DashboardScreenProps = {
+  marketSession: MarketWsSession;
   mode: 'default' | 'debug';
   network: NetworkConfig;
   walletAddress?: string;
@@ -93,12 +96,14 @@ const CHAT_USER_COLOR = '#FFD166';
 const CHAT_ASSISTANT_COLOR = '#7FDBFF';
 const CHAT_ASSISTANT_LABEL_COLOR = '#D7E3F4';
 const CHAT_ASSISTANT_LINK_COLOR = '#AAB6FF';
+const CHAT_VISIBLE_MESSAGE_COUNT = 8;
 const WELCOME_LOGO_COLOR = '#34FFAD';
 const WELCOME_LOGO_IDLE_COLOR = '#0F5C41';
 const WELCOME_LOGO_GUIDE_COLOR = '#335C4D';
 const WELCOME_LOGO_ANIMATION_INTERVAL_MS = 30;
 const WELCOME_LOGO_BLINK_FRAMES = 4;
 const CHAT_LOADING_ANIMATION_INTERVAL_MS = 80;
+const TRANSCRIPT_SCROLL_STEP = 4;
 const COMMAND_TEXT_COLOR = 'gray';
 const COMMAND_HIGHLIGHT_COLOR = '#AAB6FF';
 const TRANSACTION_CONFIRMATION_ITEMS = [
@@ -260,6 +265,7 @@ export function getTranscriptMessageTrailingSpacing(
 }
 
 export const DashboardScreen: FC<DashboardScreenProps> = ({
+  marketSession,
   mode,
   network,
   walletAddress,
@@ -289,8 +295,10 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     getInitialOutputView(mode),
   );
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => []);
+  const [transcriptScrollOffset, setTranscriptScrollOffset] = useState(0);
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [chatLoadingFrame, setChatLoadingFrame] = useState(0);
+  const [streamingAssistantReply, setStreamingAssistantReply] = useState('');
   const [pendingChatTrade, setPendingChatTrade] =
     useState<ParsedChatTradeIntent>();
   const [transactionConfirmationIndex, setTransactionConfirmationIndex] =
@@ -316,6 +324,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     candleError,
     orderbookError,
   } = useMarketData({
+    marketSession,
     network,
     pairKind,
     pairIndex,
@@ -328,9 +337,18 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
   const priceLabel =
     activePrice > 0 ? activePrice.toFixed(currentPair.priceDecimal) : '--';
   const resolutionLabel = formatResolution(resolution);
-  const visibleChatMessages = useMemo(
-    () => getVisibleChatMessages(chatMessages, 8),
+  const maxTranscriptScrollOffset = useMemo(
+    () => getMaxChatScrollOffset(chatMessages, CHAT_VISIBLE_MESSAGE_COUNT),
     [chatMessages],
+  );
+  const visibleChatMessages = useMemo(
+    () =>
+      getVisibleChatMessages(
+        chatMessages,
+        CHAT_VISIBLE_MESSAGE_COUNT,
+        transcriptScrollOffset,
+      ),
+    [chatMessages, transcriptScrollOffset],
   );
   const pairOptions = useMemo(
     () => [...pairGroups.perp, ...pairGroups.spot],
@@ -387,6 +405,12 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       return Math.min(current, commandPaletteItems.length - 1);
     });
   }, [commandPaletteItems]);
+
+  useEffect(() => {
+    setTranscriptScrollOffset((current) =>
+      Math.min(current, maxTranscriptScrollOffset),
+    );
+  }, [maxTranscriptScrollOffset]);
 
   function setComposerValue(nextValue: string) {
     inputValueRef.current = nextValue;
@@ -605,6 +629,20 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       return;
     }
 
+    if ((key as { pageUp?: boolean }).pageUp) {
+      setTranscriptScrollOffset((current) =>
+        Math.min(maxTranscriptScrollOffset, current + TRANSCRIPT_SCROLL_STEP),
+      );
+      return;
+    }
+
+    if ((key as { pageDown?: boolean }).pageDown) {
+      setTranscriptScrollOffset((current) =>
+        Math.max(0, current - TRANSCRIPT_SCROLL_STEP),
+      );
+      return;
+    }
+
     if (key.upArrow) {
       const next = getHistoryValue(
         inputHistory,
@@ -732,6 +770,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     const nextMessages = appendChatMessage(chatMessages, 'user', content);
     setChatMessages(nextMessages);
     setIsChatLoading(true);
+    setStreamingAssistantReply('');
 
     try {
       if (pendingChatTrade && isTradeConfirmationMessage(content)) {
@@ -757,8 +796,10 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
           resolutionLabel,
           walletUnlocked,
         },
+        onText: setStreamingAssistantReply,
       });
       if (agentResult.kind === 'needs_user_action') {
+        setStreamingAssistantReply('');
         setPendingAgentAction(agentResult.action);
         setPendingAgentContinuation(agentResult.continuation);
         setAgentActionSelectionIndex(0);
@@ -778,6 +819,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
         return;
       }
 
+      setStreamingAssistantReply('');
       setChatMessages((messages) =>
         appendChatMessage(messages, 'assistant', agentResult.reply),
       );
@@ -789,6 +831,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       }
     } catch (error) {
       logError('shell', 'Chat submit failed', formatErrorMessage(error));
+      setStreamingAssistantReply('');
       setChatMessages((messages) =>
         appendChatMessage(
           messages,
@@ -856,6 +899,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       appendChatMessage(messages, 'user', userContent),
     );
     setIsChatLoading(true);
+    setStreamingAssistantReply('');
 
     try {
       const actionResult =
@@ -871,10 +915,12 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
       const agentResult = await continueAgentChatAfterUserAction({
         continuation: pendingAgentContinuation,
         actionResult,
+        onText: setStreamingAssistantReply,
       });
       clearPendingAgentAction();
 
       if (agentResult.kind === 'needs_user_action') {
+        setStreamingAssistantReply('');
         setPendingAgentAction(agentResult.action);
         setPendingAgentContinuation(agentResult.continuation);
         setChatMessages((messages) =>
@@ -891,6 +937,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
         return;
       }
 
+      setStreamingAssistantReply('');
       setChatMessages((messages) =>
         appendChatMessage(messages, 'assistant', agentResult.reply),
       );
@@ -903,6 +950,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     } catch (error) {
       logError('shell', 'Agent action failed', formatErrorMessage(error));
       clearPendingAgentAction();
+      setStreamingAssistantReply('');
       setChatMessages((messages) =>
         appendChatMessage(
           messages,
@@ -1063,7 +1111,25 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
               </Text>
             </Box>
           ))}
-          {isChatLoading ? (
+          {isChatLoading &&
+          transcriptScrollOffset === 0 &&
+          streamingAssistantReply.trim().length > 0 ? (
+            <Box
+              flexDirection="column"
+              marginTop={getTranscriptMessageSpacing(
+                visibleChatMessages[visibleChatMessages.length - 1]?.role,
+                'assistant',
+              )}
+              marginBottom={getTranscriptMessageTrailingSpacing('assistant')}
+            >
+              <Text color={CHAT_ASSISTANT_COLOR}>
+                AI&gt; {renderAssistantMessage(streamingAssistantReply)}
+              </Text>
+            </Box>
+          ) : null}
+          {isChatLoading &&
+          transcriptScrollOffset === 0 &&
+          streamingAssistantReply.trim().length === 0 ? (
             <Box
               flexDirection="column"
               marginTop={getTranscriptMessageSpacing(
