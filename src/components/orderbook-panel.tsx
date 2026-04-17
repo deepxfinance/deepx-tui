@@ -3,7 +3,7 @@ import type { FC } from 'react';
 import { useMemo } from 'react';
 
 import { padRight } from '../lib/format';
-import { formatLocalTimeOfDayWithSeconds } from '../lib/time';
+import { formatLocalTimeOfDayWithMilliseconds } from '../lib/time';
 
 const SELL_COLOR = '#FF3131';
 const BUY_COLOR = '#28DE9C';
@@ -367,7 +367,7 @@ export function getOrderbookHeaderRow() {
 }
 
 export function getTradesHeaderRow() {
-  return `${padRight('TIME', 10)}${padRight('PRICE', 9)}SIZE`;
+  return `${padRight('TIME', 13)}${padRight('PRICE', 9)}SIZE`;
 }
 
 export function calculateOrderBookHeatWidth(
@@ -500,7 +500,7 @@ function padTradeRows(
 }
 
 function formatTradeRow(trade: TradeItem) {
-  return `${padRight(formatTradeTime(trade), 10)}${padRight(
+  return `${padRight(formatTradeTime(trade), 13)}${padRight(
     formatCompactDecimal(trade.price, 2),
     9,
   )}${formatCompactDecimal(resolveTradeSize(trade), 3)}`;
@@ -639,17 +639,17 @@ function formatTradeTime(trade: TradeItem) {
   if (Number.isFinite(numericTime)) {
     const timestamp =
       numericTime > 1_000_000_000_000 ? numericTime : numericTime * 1000;
-    return formatLocalTimeOfDayWithSeconds(timestamp);
+    return formatLocalTimeOfDayWithMilliseconds(timestamp);
   }
 
   if (trade.createdAt) {
     const parsed = Date.parse(trade.createdAt);
     if (Number.isFinite(parsed)) {
-      return formatLocalTimeOfDayWithSeconds(parsed);
+      return formatLocalTimeOfDayWithMilliseconds(parsed);
     }
   }
 
-  return '--:--:--';
+  return '--:--:--.---';
 }
 
 export function formatPercentChange(value?: number) {

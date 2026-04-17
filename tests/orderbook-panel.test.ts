@@ -158,8 +158,8 @@ describe('orderbook panel', () => {
           2,
         ),
       ).toEqual([
-        { value: '11:00:00  99.50    0.450', isBuy: true },
-        { value: '11:00:05  99.25    0.100', isBuy: false },
+        { value: '11:00:00.000 99.50    0.450', isBuy: true },
+        { value: '11:00:05.000 99.25    0.100', isBuy: false },
       ]);
     } finally {
       Intl.DateTimeFormat.prototype.resolvedOptions = originalResolvedOptions;
@@ -199,7 +199,7 @@ describe('orderbook panel', () => {
 
   test('pads table headers to the same columns as the data rows', () => {
     expect(getOrderbookHeaderRow()).toBe('PRICE      SIZE      TOTAL');
-    expect(getTradesHeaderRow()).toBe('TIME      PRICE    SIZE');
+    expect(getTradesHeaderRow()).toBe('TIME         PRICE    SIZE');
   });
 
   test('calculates mid price from the best bid and best ask', () => {

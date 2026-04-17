@@ -4,6 +4,7 @@ import {
   alignTimestampToResolution,
   formatChartTimestamp,
   formatLocalTimeOfDay,
+  formatLocalTimeOfDayWithMilliseconds,
   formatLocalTimeOfDayWithSeconds,
   normalizeUnixTimestamp,
 } from '../src/lib/time';
@@ -98,5 +99,16 @@ describe('formatLocalTimeOfDayWithSeconds', () => {
         'America/New_York',
       ),
     ).toBe('05:05:07');
+  });
+});
+
+describe('formatLocalTimeOfDayWithMilliseconds', () => {
+  test('formats timestamps with milliseconds in an explicit timezone', () => {
+    expect(
+      formatLocalTimeOfDayWithMilliseconds(
+        Date.UTC(2026, 2, 26, 9, 5, 7, 89),
+        'America/New_York',
+      ),
+    ).toBe('05:05:07.089');
   });
 });

@@ -113,6 +113,27 @@ export function formatLocalTimeOfDayWithSeconds(
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}`;
 }
 
+export function formatLocalTimeOfDayWithMilliseconds(
+  timestamp: number | string | undefined,
+  timeZone = getUserTimeZone(),
+): string {
+  if (timestamp == null) {
+    return '--:--:--.---';
+  }
+
+  const normalizedTimestamp =
+    typeof timestamp === 'number'
+      ? normalizeUnixTimestamp(timestamp)
+      : timestamp;
+  const date = new Date(normalizedTimestamp);
+  if (Number.isNaN(date.getTime())) {
+    return '--:--:--.---';
+  }
+
+  const { hour, minute, second } = resolveTimeParts(date, timeZone, true);
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}.${String(date.getMilliseconds()).padStart(3, '0')}`;
+}
+
 function fallbackTimeLabel(resolution: string): string {
   return resolution === '1D' || resolution === '1W' || resolution === '1M'
     ? '-- --'
