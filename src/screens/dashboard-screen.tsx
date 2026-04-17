@@ -1403,18 +1403,18 @@ type TransactionConfirmationSelectorProps = {
   selectedIndex: number;
 };
 
-function getConfirmationActionColors(
+export function getConfirmationActionColors(
   action: TransactionConfirmationAction,
   isSelected: boolean,
 ) {
   if (action === 'confirm') {
     return isSelected
-      ? { color: 'green', backgroundColor: 'white' as const }
+      ? { color: 'white', backgroundColor: 'green' as const }
       : { color: 'black', backgroundColor: 'green' as const };
   }
 
   return isSelected
-    ? { color: 'red', backgroundColor: 'white' as const }
+    ? { color: 'white', backgroundColor: 'red' as const }
     : { color: 'white', backgroundColor: 'red' as const };
 }
 

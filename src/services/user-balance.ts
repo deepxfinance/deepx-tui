@@ -618,8 +618,6 @@ export type WalletPortfolioToolResult =
       network: RuntimeNetwork;
       walletAddress: string;
       subaccountAddress: string;
-      netValue: string;
-      netValueDisplay: string;
       totalValue: string;
       totalValueDisplay: string;
       totalDeposits: string;
@@ -969,7 +967,7 @@ export async function fetchWalletPortfolio(input: {
 
   const totalValueRaw =
     totalUnrealizedPnlRaw + totalDepositsRaw - totalBorrowedRaw;
-  const netValueRaw = initialMargin.collateral - initialMargin.margin_required;
+  // initialMargin.collateral - initialMargin.margin_required;
   const marginRatio =
     maintenanceMargin.collateral > 0n && maintenanceMargin.margin_required > 0n
       ? formatRatio(
@@ -995,8 +993,6 @@ export async function fetchWalletPortfolio(input: {
     network: input.network,
     walletAddress: input.walletAddress,
     subaccountAddress: input.subaccountAddress,
-    netValue: formatUnits(netValueRaw, USD_DECIMALS),
-    netValueDisplay: formatUsdDisplay(netValueRaw),
     totalValue: formatUnits(totalValueRaw, USD_DECIMALS),
     totalValueDisplay: formatUsdDisplay(totalValueRaw),
     totalDeposits: formatUnits(totalDepositsRaw, USD_DECIMALS),
@@ -1021,7 +1017,6 @@ export async function fetchWalletPortfolio(input: {
       network: input.network,
       walletAddress: input.walletAddress,
       totalValueRaw,
-      netValueRaw,
       totalDepositsRaw,
       totalBorrowedRaw,
       totalUnrealizedPnlRaw,
@@ -1154,7 +1149,6 @@ function buildWalletPortfolioSummary(input: {
   network: RuntimeNetwork;
   walletAddress: string;
   totalValueRaw: bigint;
-  netValueRaw: bigint;
   totalDepositsRaw: bigint;
   totalBorrowedRaw: bigint;
   totalUnrealizedPnlRaw: bigint;
@@ -1168,7 +1162,6 @@ function buildWalletPortfolioSummary(input: {
   return [
     `${input.network} wallet portfolio for ${input.walletAddress}`,
     `total value ${formatUsdDisplay(input.totalValueRaw)}`,
-    `net value ${formatUsdDisplay(input.netValueRaw)}`,
     `deposits ${formatUsdDisplay(input.totalDepositsRaw)}`,
     `borrowed ${formatUsdDisplay(input.totalBorrowedRaw)}`,
     `positions unrealized PnL ${formatUsdDisplay(input.totalUnrealizedPnlRaw)}`,

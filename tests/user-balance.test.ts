@@ -427,7 +427,6 @@ describe('wallet portfolio tool', () => {
       totalBorrowed: '450.0',
       totalUnrealizedPnl: '-70.0',
       totalValue: '3730.0',
-      netValue: '3300.0',
       totalCollateral: '4300.0',
       totalMarginRequired: '1000.0',
       totalMaintenanceMarginRequired: '800.0',

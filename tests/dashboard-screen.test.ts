@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   getAssistantMessageSegments,
   getCommandMessageSegments,
+  getConfirmationActionColors,
   getDashboardLayoutSlots,
   getInitialOutputView,
   getTranscriptMessageSpacing,
@@ -209,6 +210,25 @@ describe('dashboard welcome logo', () => {
       showCommandPaletteBelowInput: false,
       showTransactionConfirmationBelowInput: true,
       showAgentActionBelowInput: false,
+    });
+  });
+
+  test('keeps confirmation backgrounds stable when selection changes', () => {
+    expect(getConfirmationActionColors('confirm', false)).toEqual({
+      color: 'black',
+      backgroundColor: 'green',
+    });
+    expect(getConfirmationActionColors('confirm', true)).toEqual({
+      color: 'white',
+      backgroundColor: 'green',
+    });
+    expect(getConfirmationActionColors('cancel', false)).toEqual({
+      color: 'white',
+      backgroundColor: 'red',
+    });
+    expect(getConfirmationActionColors('cancel', true)).toEqual({
+      color: 'white',
+      backgroundColor: 'red',
     });
   });
 
