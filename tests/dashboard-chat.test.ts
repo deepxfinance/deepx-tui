@@ -2,10 +2,12 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   appendChatMessage,
+  appendOrderbookSnapshotMessage,
   buildChatSystemPrompt,
   buildGenAiContents,
   createChatMessage,
   createInitialChatMessages,
+  createOrderbookSnapshotMessage,
   getChatLoadingMessage,
   getChatLoadingSegments,
   getMaxChatScrollOffset,
@@ -67,14 +69,34 @@ describe('dashboard chat', () => {
   test('maps chat history into GenAI contents', () => {
     expect(
       buildGenAiContents([
-        { id: 'user-1', role: 'user', content: 'hello' },
-        { id: 'command-2', role: 'command', content: '/help' },
-        { id: 'assistant-2', role: 'assistant', content: 'hi' },
+        { id: 'user-1', kind: 'text', role: 'user', content: 'hello' },
+        { id: 'command-2', kind: 'text', role: 'command', content: '/help' },
+        { id: 'assistant-2', kind: 'text', role: 'assistant', content: 'hi' },
       ]),
     ).toEqual([
       { role: 'user', parts: [{ text: 'hello' }] },
       { role: 'model', parts: [{ text: 'hi' }] },
     ]);
+  });
+
+  test('skips frozen orderbook snapshots in GenAI contents', () => {
+    expect(
+      buildGenAiContents([
+        {
+          id: 'orderbook-snapshot-2',
+          kind: 'orderbook_snapshot',
+          role: 'command',
+          snapshot: {
+            capturedAtLabel: '14:23:11',
+            pairLabel: 'ETH-USDC',
+            latestPrice: '2500.00',
+            orderbook: null,
+            trades: [],
+          },
+        },
+        { id: 'assistant-3', kind: 'text', role: 'assistant', content: 'hi' },
+      ]),
+    ).toEqual([{ role: 'model', parts: [{ text: 'hi' }] }]);
   });
 
   test('caps the conversation to the newest messages', () => {
@@ -94,36 +116,86 @@ describe('dashboard chat', () => {
 
   test('returns the most recent visible messages', () => {
     const messages = [
-      { id: 'assistant-1', role: 'assistant' as const, content: 'a' },
-      { id: 'user-2', role: 'user' as const, content: 'b' },
-      { id: 'assistant-3', role: 'assistant' as const, content: 'c' },
+      {
+        id: 'assistant-1',
+        kind: 'text' as const,
+        role: 'assistant' as const,
+        content: 'a',
+      },
+      {
+        id: 'user-2',
+        kind: 'text' as const,
+        role: 'user' as const,
+        content: 'b',
+      },
+      {
+        id: 'assistant-3',
+        kind: 'text' as const,
+        role: 'assistant' as const,
+        content: 'c',
+      },
     ];
 
     expect(getVisibleChatMessages(messages, 2)).toEqual([
-      { id: 'user-2', role: 'user', content: 'b' },
-      { id: 'assistant-3', role: 'assistant', content: 'c' },
+      { id: 'user-2', kind: 'text', role: 'user', content: 'b' },
+      { id: 'assistant-3', kind: 'text', role: 'assistant', content: 'c' },
     ]);
   });
 
   test('returns older visible messages when the transcript is scrolled up', () => {
     const messages = [
-      { id: 'assistant-1', role: 'assistant' as const, content: 'a' },
-      { id: 'user-2', role: 'user' as const, content: 'b' },
-      { id: 'assistant-3', role: 'assistant' as const, content: 'c' },
-      { id: 'user-4', role: 'user' as const, content: 'd' },
+      {
+        id: 'assistant-1',
+        kind: 'text' as const,
+        role: 'assistant' as const,
+        content: 'a',
+      },
+      {
+        id: 'user-2',
+        kind: 'text' as const,
+        role: 'user' as const,
+        content: 'b',
+      },
+      {
+        id: 'assistant-3',
+        kind: 'text' as const,
+        role: 'assistant' as const,
+        content: 'c',
+      },
+      {
+        id: 'user-4',
+        kind: 'text' as const,
+        role: 'user' as const,
+        content: 'd',
+      },
     ];
 
     expect(getVisibleChatMessages(messages, 2, 1)).toEqual([
-      { id: 'user-2', role: 'user', content: 'b' },
-      { id: 'assistant-3', role: 'assistant', content: 'c' },
+      { id: 'user-2', kind: 'text', role: 'user', content: 'b' },
+      { id: 'assistant-3', kind: 'text', role: 'assistant', content: 'c' },
     ]);
   });
 
   test('calculates the maximum transcript scroll offset', () => {
     const messages = [
-      { id: 'assistant-1', role: 'assistant' as const, content: 'a' },
-      { id: 'user-2', role: 'user' as const, content: 'b' },
-      { id: 'assistant-3', role: 'assistant' as const, content: 'c' },
+      {
+        id: 'assistant-1',
+        kind: 'text' as const,
+        role: 'assistant' as const,
+        content: 'a',
+      },
+      {
+        id: 'user-2',
+        kind: 'text' as const,
+        role: 'user' as const,
+        content: 'b',
+      },
+      {
+        id: 'assistant-3',
+        kind: 'text' as const,
+        role: 'assistant' as const,
+        content: 'c',
+      },
     ];
 
     expect(getMaxChatScrollOffset(messages, 2)).toBe(1);
@@ -133,13 +205,86 @@ describe('dashboard chat', () => {
   test('creates stable incrementing chat ids', () => {
     expect(
       createChatMessage('assistant', 'next', [
-        { id: 'assistant-7', role: 'assistant', content: 'prev' },
+        { id: 'assistant-7', kind: 'text', role: 'assistant', content: 'prev' },
       ]),
     ).toEqual({
       id: 'assistant-8',
+      kind: 'text',
       role: 'assistant',
       content: 'next',
     });
+  });
+
+  test('creates a frozen orderbook snapshot message with a stable id', () => {
+    expect(
+      createOrderbookSnapshotMessage(
+        {
+          capturedAtLabel: '14:23:11',
+          pairLabel: 'ETH-USDC',
+          latestPrice: '2500.00',
+          priceChange1h: 1.2,
+          priceChange24h: -3.4,
+          volume24h: 12345,
+          orderbook: null,
+          trades: [],
+        },
+        [
+          {
+            id: 'command-7',
+            kind: 'text',
+            role: 'command',
+            content: '/orderbook',
+          },
+        ],
+      ),
+    ).toEqual({
+      id: 'orderbook-snapshot-8',
+      kind: 'orderbook_snapshot',
+      role: 'command',
+      snapshot: {
+        capturedAtLabel: '14:23:11',
+        pairLabel: 'ETH-USDC',
+        latestPrice: '2500.00',
+        priceChange1h: 1.2,
+        priceChange24h: -3.4,
+        volume24h: 12345,
+        orderbook: null,
+        trades: [],
+      },
+    });
+  });
+
+  test('caps the conversation when appending an orderbook snapshot', () => {
+    const messages = Array.from({ length: 12 }, (_, index) => ({
+      id: `assistant-${index + 1}`,
+      kind: 'text' as const,
+      role: 'assistant' as const,
+      content: `message ${index + 1}`,
+    }));
+
+    expect(
+      appendOrderbookSnapshotMessage(messages, {
+        capturedAtLabel: '14:23:11',
+        pairLabel: 'ETH-USDC',
+        latestPrice: '2500.00',
+        orderbook: null,
+        trades: [],
+      }),
+    ).toEqual([
+      ...messages.slice(1),
+      {
+        id: 'orderbook-snapshot-13',
+        kind: 'orderbook_snapshot',
+        role: 'command',
+        snapshot: {
+          capturedAtLabel: '14:23:11',
+          pairLabel: 'ETH-USDC',
+          latestPrice: '2500.00',
+          orderbook: null,
+          trades: [],
+        },
+      },
+    ]);
   });
 
   test('cycles a deterministic loading message', () => {

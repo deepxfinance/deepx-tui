@@ -43,14 +43,16 @@ bun test
 - The tool layer can prepare Subaccount contract creation through `deepx_create_subaccount`; live submission uses the same local confirmation gate plus an unlocked session wallet or explicit passphrase prompt
 - Live perp place, cancel, close, and TP/SL update transactions fetch the wallet's subaccount list over RPC, select the primary Subaccount contract address, and then populate perp contract calls
 - Live spot place transactions fetch the wallet's subaccount list over RPC, select the primary Subaccount contract address, and then populate spot contract calls
+- Wallet portfolio and position snapshot reads now call `userPerpPositions` on the Perp contract over RPC with the selected Subaccount contract address, not the wallet signer address
 - Market ids are network-specific: perp ids come from `/v2/market/perp/markets`, while spot ids come from `/v2/market/spot/markets` and use the bytes32 `pair` value rather than the numeric perp market id
 - The terminal now loads market metadata from the selected backend APIs on demand and caches it per network in-process for the current session
-- The app now starts a shared market websocket session as soon as the selected network boots and reuses it for orderbook and position websocket consumers instead of opening duplicate sockets
+- The app now starts a shared market websocket session as soon as the selected network boots and reuses it for orderbook consumers instead of opening duplicate sockets
 - AI chat resumes after user confirmation or cancellation by sending the local action result back to the model as a tool response
 - AI chat now routes live order cancellation, position close, TP/SL updates, and subaccount creation through the confirmation gate instead of leaving them permanently blocked
 - trade commands entered in chat now go through the DeepX agent instead of a local parser shortcut
 - the shell is chat-first and uses slash commands for market views
 - `/candle` and `/orderbook` first require pair selection, then reuse live market data streams for the chosen pair
+- pressing `Esc` with an empty composer while `/orderbook` is active closes the live workspace and stores a frozen `Snapshot HH:MM:SS` orderbook card in the transcript
 - debug mode captures HTTP market requests, RPC transaction submissions, websocket events, and wallet/chat lifecycle events in the shared logger
 - debug mode also appends captured log entries to `~/.local/state/deepx/logs/debug.log` by default; set `DEEPX_DEBUG_LOG_FILE` to override the file path
 - default mode keeps the shared logger at warn/error level to avoid constant websocket logging overhead

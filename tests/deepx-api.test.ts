@@ -71,11 +71,11 @@ describe('fetchMarketPriceInfo', () => {
     expect(result).toEqual({
       pair: 'ETH-USDC',
       kind: 'perp',
-      latestPrice: '1925.00',
-      last24hChange: '+25.00',
-      last24hChangePercent: '+1.32%',
+      latestPrice: '1930.00',
+      last24hChange: '+30.00',
+      last24hChangePercent: '+1.58%',
       summary:
-        'ETH-USDC perp market, latest price 1925.00, 24h change +25.00 (+1.32%)',
+        'ETH-USDC perp market, latest price 1930.00, 24h change +30.00 (+1.58%)',
     });
   });
 
@@ -88,11 +88,11 @@ describe('fetchMarketPriceInfo', () => {
     expect(result).toEqual({
       pair: 'SOL/USDC',
       kind: 'spot',
-      latestPrice: '151.2500',
-      last24hChange: '+1.7500',
-      last24hChangePercent: '+1.17%',
+      latestPrice: '151.7500',
+      last24hChange: '+2.2500',
+      last24hChangePercent: '+1.51%',
       summary:
-        'SOL/USDC spot market, latest price 151.2500, 24h change +1.7500 (+1.17%)',
+        'SOL/USDC spot market, latest price 151.7500, 24h change +2.2500 (+1.51%)',
     });
   });
 });

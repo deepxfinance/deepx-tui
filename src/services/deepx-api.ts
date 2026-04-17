@@ -46,6 +46,18 @@ type CandleResponse = {
   details: CandleDetail[];
 };
 
+type PerpMarketPriceApi = {
+  id: number;
+  name: string;
+  oraclePrice?: string | number;
+};
+
+type SpotMarketPriceApi = {
+  name: string;
+  pair: string;
+  price?: string | number;
+};
+
 export async function fetchCandles(input: {
   network: NetworkConfig;
   pair: MarketPair;
@@ -98,6 +110,7 @@ export async function fetchMarketPriceInfo(input: {
   pair: string;
 }): Promise<MarketPriceInfo> {
   const market = await findMarketPair(input.network, input.pair);
+  const currentPrice = await fetchCurrentMarketPrice(input.network, market);
   const candles = await fetchCandles({
     network: input.network,
     pair: market,
@@ -113,7 +126,7 @@ export async function fetchMarketPriceInfo(input: {
     );
   }
 
-  const latestPrice = latestBar.close;
+  const latestPrice = currentPrice ?? latestBar.close;
   const last24hChange = latestPrice - anchorBar.close;
   const last24hChangePercent =
     anchorBar.close === 0 ? 0 : (last24hChange / anchorBar.close) * 100;
@@ -167,6 +180,35 @@ export async function fetchJson<T>(
   }
 
   return JSON.parse(responseBody) as T;
+}
+
+async function fetchCurrentMarketPrice(
+  network: NetworkConfig,
+  market: Awaited<ReturnType<typeof findMarketPair>>,
+) {
+  if (market.kind === 'perp') {
+    const response = await fetchJson<ApiEnvelope<PerpMarketPriceApi[]>>(
+      network,
+      '/v2/market/perp/markets',
+    );
+    const entry = (response.data ?? []).find(
+      (item) =>
+        Number(item.id) === Number(market.marketId) ||
+        item.name === market.label,
+    );
+
+    return parseFiniteNumber(entry?.oraclePrice);
+  }
+
+  const response = await fetchJson<ApiEnvelope<SpotMarketPriceApi[]>>(
+    network,
+    '/v2/market/spot/markets',
+  );
+  const entry = (response.data ?? []).find(
+    (item) => item.pair === market.pairId || item.name === market.label,
+  );
+
+  return parseFiniteNumber(entry?.price);
 }
 
 export function resolutionToTimeFrame(resolution: string): string {
@@ -241,4 +283,9 @@ async function findMarketPair(network: NetworkConfig, requestedPair: string) {
   }
 
   return pair;
+}
+
+function parseFiniteNumber(value: string | number | undefined) {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : undefined;
 }

@@ -245,7 +245,7 @@ async function runAgentToolLoop(input: {
 
     const functionCalls = normalizeFunctionCalls(response.functionCalls);
     if (functionCalls.length === 0) {
-      const text = normalizeAgentText(response.text);
+      const text = normalizeAgentText(resolveResponseText(response));
       if (!text) {
         throw new Error('GenAI SDK returned no text.');
       }
@@ -341,7 +341,7 @@ async function requestAgentModelResponse(input: {
   const functionCallParts = new Map<string, Part>();
 
   for await (const chunk of stream) {
-    text = mergeStreamText(text, chunk.text);
+    text = mergeStreamText(text, resolveResponseText(chunk));
     if (text) {
       input.onText?.(text);
     }
@@ -380,6 +380,17 @@ async function requestAgentModelResponse(input: {
       .map((part) => part.functionCall)
       .filter((call): call is FunctionCall => call !== undefined),
   };
+}
+
+function resolveResponseText(response: GenAiResponseLike) {
+  const candidateText = (response.candidates?.[0]?.content?.parts ?? [])
+    .map((part) => (typeof part.text === 'string' ? part.text : ''))
+    .join('');
+  if (candidateText) {
+    return candidateText;
+  }
+
+  return response.text ?? '';
 }
 
 function buildModelToolCallContent(

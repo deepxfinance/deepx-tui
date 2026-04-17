@@ -3,12 +3,14 @@ import { describe, expect, test } from 'bun:test';
 import {
   getAssistantMessageSegments,
   getCommandMessageSegments,
+  getConfirmationActionColors,
   getDashboardLayoutSlots,
   getInitialOutputView,
   getTranscriptMessageSpacing,
   getTranscriptMessageTrailingSpacing,
   getWelcomeLogoFrames,
   getWorkspaceHeight,
+  shouldCloseActiveOrderbookOnEscape,
   WELCOME_LOGO_LINES,
 } from '../src/screens/dashboard-screen';
 import { buildHelpLines } from '../src/screens/help-screen';
@@ -176,6 +178,27 @@ describe('dashboard welcome logo', () => {
     expect(getTranscriptMessageTrailingSpacing('command')).toBe(0);
   });
 
+  test('uses Esc to close an active orderbook only when the composer is empty', () => {
+    expect(
+      shouldCloseActiveOrderbookOnEscape({
+        composerValue: '',
+        outputView: { kind: 'orderbook' },
+      }),
+    ).toBe(true);
+    expect(
+      shouldCloseActiveOrderbookOnEscape({
+        composerValue: 'buy eth',
+        outputView: { kind: 'orderbook' },
+      }),
+    ).toBe(false);
+    expect(
+      shouldCloseActiveOrderbookOnEscape({
+        composerValue: '',
+        outputView: { kind: 'candle' },
+      }),
+    ).toBe(false);
+  });
+
   test('renders the slash-command selector below the input bar', () => {
     expect(
       getDashboardLayoutSlots({
@@ -209,6 +232,25 @@ describe('dashboard welcome logo', () => {
       showCommandPaletteBelowInput: false,
       showTransactionConfirmationBelowInput: true,
       showAgentActionBelowInput: false,
+    });
+  });
+
+  test('keeps confirmation backgrounds stable when selection changes', () => {
+    expect(getConfirmationActionColors('confirm', false)).toEqual({
+      color: 'black',
+      backgroundColor: 'green',
+    });
+    expect(getConfirmationActionColors('confirm', true)).toEqual({
+      color: 'white',
+      backgroundColor: 'green',
+    });
+    expect(getConfirmationActionColors('cancel', false)).toEqual({
+      color: 'white',
+      backgroundColor: 'red',
+    });
+    expect(getConfirmationActionColors('cancel', true)).toEqual({
+      color: 'white',
+      backgroundColor: 'red',
     });
   });
 

@@ -100,8 +100,8 @@ describe('wallet portfolio tool', () => {
         async readWalletRecord() {
           return walletRecord;
         },
-        async fetchPerpPositions() {
-          calls.push('positions:wallet');
+        async fetchPerpPositions(input) {
+          calls.push(`positions:${input.subaccountAddress}`);
           return [];
         },
         createContracts() {
@@ -159,7 +159,94 @@ describe('wallet portfolio tool', () => {
     expect(calls).not.toContain(
       'subaccountInfo:0x1111000000000000000000000000000000001111',
     );
-    expect(calls).toContain('positions:wallet');
+    expect(calls).toContain(
+      'positions:0x2222000000000000000000000000000000002222',
+    );
+  });
+
+  test('fetches perp positions with the selected contract subaccount address', async () => {
+    const calls: string[] = [];
+
+    const result = await fetchWalletPortfolio({
+      network: 'deepx_devnet',
+      walletAddress: walletRecord.address,
+      subaccountAddress: '0x2222000000000000000000000000000000002222',
+      fetchPerpPositions: async (input) => {
+        calls.push(`fetchPerpPositions:${input.subaccountAddress}`);
+        return [
+          {
+            marketId: 3,
+            isLong: true,
+            baseAssetAmount: 500_000_000_000_000_000n,
+            entryPrice: 1_900_000_000n,
+            leverage: 5,
+            lastFundingRate: 0n,
+            isolatedMargin: 0n,
+            version: 1n,
+            unrealizedPnl: 0n,
+            realizedPnl: 0n,
+            fundingPayment: 0n,
+            owner: input.subaccountAddress,
+            takeProfit: 0n,
+            stopLoss: 0n,
+            liquidatePrice: 0n,
+          },
+        ];
+      },
+      contracts: {
+        async userStats() {
+          return {
+            subaccounts: [],
+            if_staked_quote_asset_amount: 0n,
+            number_of_sub_accounts: 0,
+            number_of_sub_accounts_created: 0,
+          };
+        },
+        async subaccountInfo() {
+          return {
+            spot_positions: [],
+            borrow_positions: [],
+          };
+        },
+        async getOraclePriceAll() {
+          return [
+            {
+              symbol:
+                '0x4554482d55534443000000000000000000000000000000000000000000000000',
+              price: 2_000_000_000n,
+            },
+          ];
+        },
+        async totalCollateralAndMarginRequiredFor() {
+          return {
+            collateral: 0n,
+            margin_required: 0n,
+          };
+        },
+        async assetPools() {
+          return [];
+        },
+      },
+    });
+
+    expect(calls).toContain(
+      'fetchPerpPositions:0x2222000000000000000000000000000000002222',
+    );
+    expect(calls).not.toContain(
+      'fetchPerpPositions:0x1111000000000000000000000000000000001111',
+    );
+    expect(result.positions).toEqual([
+      {
+        marketId: 3,
+        pair: 'ETH-USDC',
+        side: 'LONG',
+        size: '0.5',
+        entryPrice: '1900.0',
+        markPrice: '2000.0',
+        unrealizedPnl: '50.0',
+        unrealizedPnlDisplay: '$50.00',
+      },
+    ]);
   });
 
   test('returns unavailable when the wallet has no contract subaccounts', async () => {
@@ -427,7 +514,6 @@ describe('wallet portfolio tool', () => {
       totalBorrowed: '450.0',
       totalUnrealizedPnl: '-70.0',
       totalValue: '3730.0',
-      netValue: '3300.0',
       totalCollateral: '4300.0',
       totalMarginRequired: '1000.0',
       totalMaintenanceMarginRequired: '800.0',

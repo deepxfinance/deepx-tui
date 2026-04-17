@@ -7,6 +7,7 @@ const MOCK_PERP_MARKETS = [
   {
     id: 3,
     name: 'ETH-USDC',
+    oraclePrice: '1930',
     baseSymbol: 'eth',
     quoteSymbol: 'usdc',
     baseDecimal: 18,
@@ -17,6 +18,7 @@ const MOCK_PERP_MARKETS = [
   {
     id: 4,
     name: 'SOL-USDC',
+    oraclePrice: '152.5',
     baseSymbol: 'sol',
     quoteSymbol: 'usdc',
     baseDecimal: 9,
@@ -30,6 +32,7 @@ const MOCK_SPOT_MARKETS = [
   {
     name: 'ETH/USDC',
     pair: '0x9068d4ac891a14784c17877eb74bd8489b3367c71d72766dbfa4dfbfb662fa37',
+    price: '1926.25',
     baseSymbol: 'eth',
     quoteSymbol: 'usdc',
     baseDecimal: 18,
@@ -39,6 +42,7 @@ const MOCK_SPOT_MARKETS = [
   {
     name: 'SOL/USDC',
     pair: '0x282895afbd8da7b26d15bff7a85a0d33aa03a08daa5bb90e38c6b92019e19c53',
+    price: '151.7500',
     baseSymbol: 'sol',
     quoteSymbol: 'usdc',
     baseDecimal: 9,

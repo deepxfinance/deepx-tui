@@ -1,30 +1,72 @@
-import { formatUnits, parseUnits } from 'ethers';
+import { Contract, formatUnits, parseUnits } from 'ethers';
 import { useEffect, useMemo, useState } from 'react';
 
 import type { NetworkConfig } from '../config/networks';
 import { padRight } from '../lib/format';
 import type { MarketPair } from './market-catalog';
-import {
-  getSharedMarketWsSession,
-  type MarketWsSession,
-} from './market-ws-session';
+import type { MarketWsSession } from './market-ws-session';
+import { createRpcProvider } from './transaction-submission';
 
-const DEFAULT_SNAPSHOT_TIMEOUT_MS = 2_000;
-const WEBSOCKET_OPEN_STATE = 1;
+const PERP_CONTRACT_ADDRESS = '0x000000000000000000000000000000000000044E';
+const PERP_POSITION_ABI = [
+  {
+    inputs: [
+      { internalType: 'address', name: 'user', type: 'address' },
+      {
+        internalType: 'uint16[]',
+        name: 'market_id',
+        type: 'uint16[]',
+      },
+    ],
+    name: 'userPerpPositions',
+    outputs: [
+      {
+        components: [
+          { internalType: 'uint16', name: 'market_id', type: 'uint16' },
+          { internalType: 'bool', name: 'is_long', type: 'bool' },
+          {
+            internalType: 'uint128',
+            name: 'base_asset_amount',
+            type: 'uint128',
+          },
+          { internalType: 'uint128', name: 'entry_price', type: 'uint128' },
+          { internalType: 'uint8', name: 'leverage', type: 'uint8' },
+          {
+            internalType: 'int128',
+            name: 'last_funding_rate',
+            type: 'int128',
+          },
+          { internalType: 'uint64', name: 'version', type: 'uint64' },
+          {
+            internalType: 'int128',
+            name: 'realized_pnl',
+            type: 'int128',
+          },
+          {
+            internalType: 'int128',
+            name: 'funding_payment',
+            type: 'int128',
+          },
+          { internalType: 'address', name: 'owner', type: 'address' },
+          { internalType: 'uint128', name: 'take_profit', type: 'uint128' },
+          { internalType: 'uint128', name: 'stop_loss', type: 'uint128' },
+          {
+            internalType: 'uint128',
+            name: 'liquidate_price',
+            type: 'uint128',
+          },
+        ],
+        internalType: 'struct Perp.PerpPosition[]',
+        name: '',
+        type: 'tuple[]',
+      },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
 
 type AddressScope = 'subaccount' | 'wallet';
-
-type WebSocketLike = {
-  readyState: number;
-  addEventListener(type: 'open', listener: () => void): void;
-  addEventListener(
-    type: 'message',
-    listener: (event: { data?: unknown }) => void,
-  ): void;
-  addEventListener(type: 'close' | 'error', listener: () => void): void;
-  send(payload: string): void;
-  close(): void;
-};
 
 export type PerpPosition = {
   marketId: number;
@@ -53,6 +95,29 @@ type WsMessage = {
       items?: unknown[];
     };
   };
+};
+
+type RawPerpContractPosition = {
+  market_id?: bigint | number | string;
+  is_long?: boolean;
+  base_asset_amount?: bigint | number | string;
+  entry_price?: bigint | number | string;
+  leverage?: bigint | number | string;
+  last_funding_rate?: bigint | number | string;
+  version?: bigint | number | string;
+  realized_pnl?: bigint | number | string;
+  funding_payment?: bigint | number | string;
+  owner?: string;
+  take_profit?: bigint | number | string;
+  stop_loss?: bigint | number | string;
+  liquidate_price?: bigint | number | string;
+};
+
+type PerpPositionContracts = {
+  userPerpPositions(
+    subaccountAddress: string,
+    marketIds: number[],
+  ): Promise<RawPerpContractPosition[]>;
 };
 
 type PositionPanelRow = {
@@ -133,112 +198,99 @@ export function useUserPerpPositions(input: {
 
 export async function fetchUserPerpPositionsSnapshot(input: {
   network: NetworkConfig;
-  walletAddress: string;
+  subaccountAddress: string;
   perpPairs: MarketPair[];
-  marketSession?: MarketWsSession;
-  timeoutMs?: number;
-  createWebSocket?: (url: string) => WebSocketLike;
+  contracts?: PerpPositionContracts;
 }): Promise<PerpPosition[]> {
-  const walletAddress = input.walletAddress.trim().toLowerCase();
+  const subaccountAddress = input.subaccountAddress.trim().toLowerCase();
   const enabledPairs = getEnabledPerpPairs(input.perpPairs);
-  if (!walletAddress || enabledPairs.length === 0) {
+  if (!subaccountAddress || enabledPairs.length === 0) {
     return [];
   }
 
-  const expectedMarketIds = new Set(
-    enabledPairs.map((pair) => pair.marketId ?? Number(pair.pairId)),
+  const contracts =
+    input.contracts ?? createPerpPositionContracts(input.network);
+  const marketIds = enabledPairs.map(
+    (pair) => pair.marketId ?? Number(pair.pairId),
   );
-  const sharedSession =
-    input.marketSession ?? getSharedMarketWsSession(input.network);
-  if (sharedSession) {
-    return fetchUserPerpPositionsSnapshotWithSession({
-      session: sharedSession,
-      walletAddress: input.walletAddress,
-      perpPairs: enabledPairs,
-      timeoutMs: input.timeoutMs,
-      expectedMarketIds,
-    });
+  const enabledMarketIds = new Set(marketIds);
+  const rawPositions = await contracts.userPerpPositions(
+    subaccountAddress,
+    marketIds,
+  );
+
+  return rawPositions
+    .map((raw) => mapContractPosition(raw, subaccountAddress))
+    .filter(
+      (position) =>
+        enabledMarketIds.has(position.marketId) &&
+        position.baseAssetAmount !== 0n,
+    );
+}
+
+function createPerpPositionContracts(
+  network: NetworkConfig,
+): PerpPositionContracts {
+  const provider = createRpcProvider(network);
+  const perpContract = new Contract(
+    PERP_CONTRACT_ADDRESS,
+    PERP_POSITION_ABI,
+    provider,
+  );
+
+  return {
+    userPerpPositions(subaccountAddress, marketIds) {
+      return perpContract.userPerpPositions(
+        subaccountAddress,
+        marketIds,
+      ) as Promise<RawPerpContractPosition[]>;
+    },
+  };
+}
+
+function mapContractPosition(
+  raw: RawPerpContractPosition,
+  subaccountAddress: string,
+) {
+  const marketId = Number(raw.market_id ?? 0);
+
+  return {
+    marketId,
+    isLong: Boolean(raw.is_long),
+    baseAssetAmount: toBigIntValue(raw.base_asset_amount),
+    entryPrice: toBigIntValue(raw.entry_price),
+    leverage: Number(raw.leverage ?? 0),
+    lastFundingRate: toBigIntValue(raw.last_funding_rate),
+    isolatedMargin: 0n,
+    version: toBigIntValue(raw.version),
+    unrealizedPnl: 0n,
+    realizedPnl: toBigIntValue(raw.realized_pnl),
+    fundingPayment: toBigIntValue(raw.funding_payment),
+    owner: raw.owner ?? subaccountAddress,
+    takeProfit: toBigIntValue(raw.take_profit),
+    stopLoss: toBigIntValue(raw.stop_loss),
+    liquidatePrice: toBigIntValue(raw.liquidate_price),
+  } satisfies PerpPosition;
+}
+
+function toBigIntValue(value: bigint | number | string | undefined) {
+  if (typeof value === 'bigint') {
+    return value;
   }
 
-  const createWebSocket = input.createWebSocket ?? createBrowserWebSocket;
+  if (typeof value === 'number') {
+    return BigInt(value);
+  }
 
-  return await new Promise<PerpPosition[]>((resolve) => {
-    let positions: PerpPosition[] = [];
-    const receivedMarketIds = new Set<number>();
-    let settled = false;
-    const websocket = createWebSocket(input.network.marketWsUrl);
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      return BigInt(value);
+    } catch {
+      return 0n;
+    }
+  }
 
-    const finish = () => {
-      if (settled) {
-        return;
-      }
-
-      settled = true;
-      clearInterval(heartbeat);
-      clearTimeout(timeoutHandle);
-      try {
-        websocket.close();
-      } catch {
-        // Ignore close failures from mocked sockets.
-      }
-      resolve(positions);
-    };
-
-    const heartbeat = setInterval(() => {
-      if (websocket.readyState !== WEBSOCKET_OPEN_STATE) {
-        return;
-      }
-
-      websocket.send(JSON.stringify({ action: 'ping' }));
-    }, 15_000);
-
-    const timeoutHandle = setTimeout(
-      finish,
-      input.timeoutMs ?? DEFAULT_SNAPSHOT_TIMEOUT_MS,
-    );
-
-    websocket.addEventListener('open', () => {
-      const payload = buildPositionsSubscriptionPayload(
-        input.walletAddress,
-        enabledPairs,
-      );
-      websocket.send(payload);
-    });
-
-    websocket.addEventListener('message', (event) => {
-      const update = parseUserPerpPositionsMessage(
-        String(event.data),
-        input.walletAddress,
-        enabledPairs,
-        { addressScope: 'wallet' },
-      );
-      if (!update) {
-        return;
-      }
-
-      positions = mergePerpPositions(
-        positions,
-        update.positions,
-        update.owner,
-        update.marketId,
-      );
-
-      if (update.marketId != null) {
-        receivedMarketIds.add(update.marketId);
-        if (receivedMarketIds.size >= expectedMarketIds.size) {
-          finish();
-        }
-      }
-    });
-
-    websocket.addEventListener('close', () => {
-      finish();
-    });
-
-    websocket.addEventListener('error', () => {
-      finish();
-    });
-  });
+  return 0n;
 }
 
 export function parseUserPerpPositionsMessage(
@@ -447,81 +499,6 @@ function buildPositionsSubscriptionKey(
     .sort((left, right) => left - right)
     .join(',');
   return `positions:${walletAddress.toLowerCase()}:${marketIds}`;
-}
-
-async function fetchUserPerpPositionsSnapshotWithSession(input: {
-  session: MarketWsSession;
-  walletAddress: string;
-  perpPairs: MarketPair[];
-  timeoutMs?: number;
-  expectedMarketIds: Set<number>;
-}) {
-  return await new Promise<PerpPosition[]>((resolve) => {
-    let positions: PerpPosition[] = [];
-    const receivedMarketIds = new Set<number>();
-    let settled = false;
-
-    const finish = () => {
-      if (settled) {
-        return;
-      }
-
-      settled = true;
-      clearTimeout(timeoutHandle);
-      unsubscribe();
-      resolve(positions);
-    };
-
-    const unsubscribe = input.session.subscribe({
-      key: buildPositionsSubscriptionKey(input.walletAddress, input.perpPairs),
-      payload: buildPositionsSubscriptionPayload(
-        input.walletAddress,
-        input.perpPairs,
-      ),
-      scope: 'positions-ws',
-      refreshOnSubscribe: true,
-      onMessage(rawMessage) {
-        const update = parseUserPerpPositionsMessage(
-          rawMessage,
-          input.walletAddress,
-          input.perpPairs,
-          { addressScope: 'wallet' },
-        );
-        if (!update) {
-          return;
-        }
-
-        positions = mergePerpPositions(
-          positions,
-          update.positions,
-          update.owner,
-          update.marketId,
-        );
-
-        if (update.marketId != null) {
-          receivedMarketIds.add(update.marketId);
-          if (receivedMarketIds.size >= input.expectedMarketIds.size) {
-            finish();
-          }
-        }
-      },
-      onClose() {
-        finish();
-      },
-      onError() {
-        finish();
-      },
-    });
-
-    const timeoutHandle = setTimeout(
-      finish,
-      input.timeoutMs ?? DEFAULT_SNAPSHOT_TIMEOUT_MS,
-    );
-  });
-}
-
-function createBrowserWebSocket(url: string) {
-  return new WebSocket(url) as unknown as WebSocketLike;
 }
 
 function mapRawPosition(raw: unknown, perpPairs: MarketPair[]): PerpPosition {

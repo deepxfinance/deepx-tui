@@ -4,32 +4,23 @@ import {
   buildOrderBookColumns,
   buildOrderBookDisplayRows,
   buildOrderBookRowKey,
-  buildOrderbookBlinkSignatures,
-  buildOrderbookRowBlinkSignatures,
   buildTradeRowKey,
   buildTradeRows,
   calculateOrderBookHeatWidth,
-  createEmptyBlinkFrames,
-  createEmptyRowBlinkFrames,
   DEFAULT_ORDERBOOK_DEPTH,
-  decayBlinkFrames,
-  decayRowBlinkFrames,
   formatPercentChange,
   formatVolume,
   getLiveStatusDotSegment,
+  getMidPriceLabel,
+  getOrderBookHeatSegments,
   getOrderbookHeaderRow,
   getOrderbookStatusSegments,
   getPriceChangeColor,
   getTradesHeaderRow,
-  hasActiveBlinkFrames,
-  hasActiveRowBlinkFrames,
-  isBlinkVisible,
-  mergeBlinkFramesForChangedSections,
-  mergeRowBlinkFramesForChangedItems,
 } from '../src/components/orderbook-panel';
 
 describe('orderbook panel', () => {
-  test('builds sell-left and buy-right columns from orderbook levels', () => {
+  test('keeps the top rows closest to mid price on both sides', () => {
     const columns = buildOrderBookColumns(
       {
         orderSellList: [
@@ -45,8 +36,8 @@ describe('orderbook panel', () => {
     );
 
     expect(columns.asks).toEqual([
-      '102.00     0.800     81.60',
       '101.00     1.200     121.20',
+      '102.00     0.800     81.60',
     ]);
     expect(columns.bids).toEqual([
       '99.00      2.000     198.00',
@@ -57,7 +48,7 @@ describe('orderbook panel', () => {
   test('pads empty orderbook rows deterministically', () => {
     const columns = buildOrderBookColumns(null, 2);
 
-    expect(columns.asks).toEqual(['', 'Waiting for asks...']);
+    expect(columns.asks).toEqual(['Waiting for asks...', '']);
     expect(columns.bids).toEqual(['Waiting for bids...', '']);
   });
 
@@ -67,7 +58,33 @@ describe('orderbook panel', () => {
     expect(calculateOrderBookHeatWidth('4', 4, 24)).toBe(24);
   });
 
-  test('builds display rows with right-anchored heat widths', () => {
+  test('anchors heat segments to the requested side of the row', () => {
+    expect(getOrderBookHeatSegments('ABCDE', 2, 'start')).toEqual({
+      leading: '',
+      highlighted: 'AB',
+      trailing: 'CDE',
+    });
+    expect(getOrderBookHeatSegments('ABCDE', 2, 'end')).toEqual({
+      leading: 'ABC',
+      highlighted: 'DE',
+      trailing: '',
+    });
+  });
+
+  test('extends heat segments against the fixed table width', () => {
+    expect(getOrderBookHeatSegments('ABCDE', 7, 'start', 7)).toEqual({
+      leading: '',
+      highlighted: 'ABCDE  ',
+      trailing: '',
+    });
+    expect(getOrderBookHeatSegments('ABCDE', 7, 'end', 7)).toEqual({
+      leading: '',
+      highlighted: '  ABCDE',
+      trailing: '',
+    });
+  });
+
+  test('builds display rows with cumulative depth widths from the mid outward', () => {
     const rows = buildOrderBookDisplayRows(
       {
         orderSellList: [
@@ -83,12 +100,12 @@ describe('orderbook panel', () => {
     );
 
     expect(rows.asks).toEqual([
-      { text: '102.00     4.000     408.00', heatWidth: 27 },
       { text: '101.00     1.000     101.00', heatWidth: 7 },
+      { text: '102.00     4.000     408.00', heatWidth: 31 },
     ]);
     expect(rows.bids).toEqual([
-      { text: '99.00      2.000     198.00', heatWidth: 27 },
-      { text: '98.00      1.000     98.00', heatWidth: 13 },
+      { text: '99.00      2.000     198.00', heatWidth: 21 },
+      { text: '98.00      1.000     98.00', heatWidth: 31 },
     ]);
   });
 
@@ -141,8 +158,8 @@ describe('orderbook panel', () => {
           2,
         ),
       ).toEqual([
-        { value: '11:00:00  99.50    0.450', isBuy: true },
-        { value: '11:00:05  99.25    0.100', isBuy: false },
+        { value: '11:00:00.000 99.50    0.450', isBuy: true },
+        { value: '11:00:05.000 99.25    0.100', isBuy: false },
       ]);
     } finally {
       Intl.DateTimeFormat.prototype.resolvedOptions = originalResolvedOptions;
@@ -182,11 +199,57 @@ describe('orderbook panel', () => {
 
   test('pads table headers to the same columns as the data rows', () => {
     expect(getOrderbookHeaderRow()).toBe('PRICE      SIZE      TOTAL');
-    expect(getTradesHeaderRow()).toBe('TIME      PRICE    SIZE');
+    expect(getTradesHeaderRow()).toBe('TIME         PRICE    SIZE');
   });
 
-  test('builds a live status label with a breathing dot', () => {
-    const segments = getOrderbookStatusSegments(3, true);
+  test('calculates mid price from the best bid and best ask', () => {
+    expect(
+      getMidPriceLabel(
+        {
+          orderSellList: [
+            { price: '101.00', qty: '1', value: '101' },
+            { price: '101.50', qty: '2', value: '203' },
+          ],
+          orderBuyList: [
+            { price: '99.00', qty: '1', value: '99' },
+            { price: '100.00', qty: '2', value: '200' },
+          ],
+        },
+        '98.00',
+      ),
+    ).toBe('100.50');
+  });
+
+  test('keeps mid price precision from orderbook and fallback labels', () => {
+    expect(
+      getMidPriceLabel(
+        {
+          orderSellList: [{ price: '101.1250', qty: '1', value: '101.1250' }],
+          orderBuyList: [{ price: '100.8750', qty: '1', value: '100.8750' }],
+        },
+        '100.0000',
+      ),
+    ).toBe('101.0000');
+  });
+
+  test('falls back to the latest price when both sides are not available', () => {
+    expect(
+      getMidPriceLabel(
+        {
+          orderSellList: [{ price: '101.00', qty: '1', value: '101' }],
+          orderBuyList: [],
+        },
+        '99.25',
+      ),
+    ).toBe('99.25');
+    expect(getMidPriceLabel(null, '99.25')).toBe('99.25');
+  });
+
+  test('builds a live status label with a static dot', () => {
+    const segments = getOrderbookStatusSegments({
+      kind: 'live',
+      isConnected: true,
+    });
 
     expect(segments).toEqual([
       {
@@ -201,37 +264,26 @@ describe('orderbook panel', () => {
         text: ' ●',
         color: '#28DE9C',
         dimColor: false,
-        bold: true,
+        bold: false,
       },
     ]);
   });
 
-  test('cycles the breathing dot emphasis deterministically', () => {
-    expect(getLiveStatusDotSegment(0)).toEqual({
-      key: 'orderbook-status-dot',
-      text: ' ●',
-      color: '#1E9F6E',
-      dimColor: false,
-      bold: false,
-    });
-    expect(getLiveStatusDotSegment(2)).toEqual({
+  test('keeps the live status dot static', () => {
+    expect(getLiveStatusDotSegment()).toEqual({
       key: 'orderbook-status-dot',
       text: ' ●',
       color: '#28DE9C',
-      dimColor: false,
-      bold: true,
-    });
-    expect(getLiveStatusDotSegment(5)).toEqual({
-      key: 'orderbook-status-dot',
-      text: ' ●',
-      color: '#0F5C41',
       dimColor: false,
       bold: false,
     });
   });
 
   test('keeps the connecting orderbook status static', () => {
-    const segments = getOrderbookStatusSegments(5, false);
+    const segments = getOrderbookStatusSegments({
+      kind: 'live',
+      isConnected: false,
+    });
 
     expect(segments.map((segment) => segment.text).join('')).toBe(
       'Connecting orderbook...',
@@ -241,116 +293,20 @@ describe('orderbook panel', () => {
     expect(segments.every((segment) => !segment.bold)).toBe(true);
   });
 
-  test('builds stable blink signatures for orderbook sections', () => {
+  test('renders a frozen snapshot status label', () => {
     expect(
-      buildOrderbookBlinkSignatures({
-        latestPrice: '100.25',
-        priceChange1h: 1.2,
-        priceChange24h: -3.4,
-        volume24h: 5000,
+      getOrderbookStatusSegments({
+        kind: 'snapshot',
+        timeLabel: '14:23:11',
       }),
-    ).toEqual({
-      mid: '100.25',
-    });
-  });
-
-  test('builds stable row blink signatures for visible orderbook items', () => {
-    expect(
-      buildOrderbookRowBlinkSignatures({
-        rows: {
-          asks: [
-            { text: '', heatWidth: 0 },
-            { text: '101.00     1.000     101.00', heatWidth: 8 },
-          ],
-          bids: [{ text: '99.00      2.000     198.00', heatWidth: 27 }],
-        },
-        trades: [
-          { value: '11:00:00  99.50    0.450', isBuy: true },
-          { value: '', isBuy: true },
-        ],
-      }),
-    ).toEqual({
-      asks: [':0', '101.00     1.000     101.00:8'],
-      bids: ['99.00      2.000     198.00:27'],
-      trades: ['11:00:00  99.50    0.450:true', ':true'],
-    });
-  });
-
-  test('starts blink frames only for changed non-empty sections', () => {
-    expect(
-      mergeBlinkFramesForChangedSections(
-        createEmptyBlinkFrames(),
-        {
-          mid: '100.00',
-        },
-        {
-          mid: '101.00',
-        },
-      ),
-    ).toEqual({
-      mid: 6,
-    });
-  });
-
-  test('starts row blink frames only for changed non-empty items', () => {
-    expect(
-      mergeRowBlinkFramesForChangedItems(
-        createEmptyRowBlinkFrames(3, 2),
-        {
-          asks: [':0', '101:4', '102:7'],
-          bids: ['99:5', '98:2', ''],
-          trades: ['trade-1:true', 'trade-2:false'],
-        },
-        {
-          asks: [':0', '101:4', '103:8'],
-          bids: ['99:5', '97:2', ''],
-          trades: ['trade-1:true', ''],
-        },
-      ),
-    ).toEqual({
-      asks: [0, 0, 6],
-      bids: [0, 6, 0],
-      trades: [0, 0],
-    });
-  });
-
-  test('decays blink frames deterministically', () => {
-    expect(
-      decayBlinkFrames({
-        mid: 2,
-      }),
-    ).toEqual({
-      mid: 1,
-    });
-    expect(hasActiveBlinkFrames(createEmptyBlinkFrames())).toBe(false);
-    expect(
-      hasActiveBlinkFrames({
-        mid: 1,
-      }),
-    ).toBe(true);
-    expect(
-      decayRowBlinkFrames({
-        asks: [2, 0],
-        bids: [1, 3],
-        trades: [4],
-      }),
-    ).toEqual({
-      asks: [1, 0],
-      bids: [0, 2],
-      trades: [3],
-    });
-    expect(hasActiveRowBlinkFrames(createEmptyRowBlinkFrames(2, 1))).toBe(
-      false,
-    );
-    expect(
-      hasActiveRowBlinkFrames({
-        asks: [0, 0],
-        bids: [0, 1],
-        trades: [0],
-      }),
-    ).toBe(true);
-    expect(isBlinkVisible(6)).toBe(true);
-    expect(isBlinkVisible(5)).toBe(false);
-    expect(isBlinkVisible(0)).toBe(false);
+    ).toEqual([
+      {
+        key: 'orderbook-status-snapshot',
+        text: 'Snapshot 14:23:11',
+        color: '#D7E3F4',
+        dimColor: false,
+        bold: false,
+      },
+    ]);
   });
 });
