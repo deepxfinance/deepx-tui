@@ -246,7 +246,10 @@ describe('orderbook panel', () => {
   });
 
   test('builds a live status label with a static dot', () => {
-    const segments = getOrderbookStatusSegments(true);
+    const segments = getOrderbookStatusSegments({
+      kind: 'live',
+      isConnected: true,
+    });
 
     expect(segments).toEqual([
       {
@@ -277,7 +280,10 @@ describe('orderbook panel', () => {
   });
 
   test('keeps the connecting orderbook status static', () => {
-    const segments = getOrderbookStatusSegments(false);
+    const segments = getOrderbookStatusSegments({
+      kind: 'live',
+      isConnected: false,
+    });
 
     expect(segments.map((segment) => segment.text).join('')).toBe(
       'Connecting orderbook...',
@@ -285,5 +291,22 @@ describe('orderbook panel', () => {
     expect(segments.every((segment) => segment.color === undefined)).toBe(true);
     expect(segments.every((segment) => segment.dimColor)).toBe(true);
     expect(segments.every((segment) => !segment.bold)).toBe(true);
+  });
+
+  test('renders a frozen snapshot status label', () => {
+    expect(
+      getOrderbookStatusSegments({
+        kind: 'snapshot',
+        timeLabel: '14:23:11',
+      }),
+    ).toEqual([
+      {
+        key: 'orderbook-status-snapshot',
+        text: 'Snapshot 14:23:11',
+        color: '#D7E3F4',
+        dimColor: false,
+        bold: false,
+      },
+    ]);
   });
 });

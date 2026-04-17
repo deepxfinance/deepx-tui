@@ -41,6 +41,41 @@ describe('agent chat service', () => {
     expect(firstCall).toBeDefined();
   });
 
+  test('reads final replies from text parts without touching the SDK text getter', async () => {
+    const client: GenAiClientLike = {
+      models: {
+        async generateContent() {
+          return {
+            candidates: [
+              {
+                content: {
+                  role: 'model',
+                  parts: [{ text: 'Clean text reply.' }],
+                },
+              },
+            ],
+            get text() {
+              throw new Error('text getter should not be used');
+            },
+          };
+        },
+      },
+    };
+
+    const result = await requestAgentChat({
+      messages: [{ id: 'user-1', role: 'user', content: 'Reply cleanly.' }],
+      context: {
+        network: 'deepx_devnet',
+        pairLabel: 'BTC-USDC',
+        priceLabel: '68250.40',
+        walletUnlocked: true,
+      },
+      client,
+    });
+
+    expect(result).toBe('Clean text reply.');
+  });
+
   test('executes local tools and sends tool responses back to the model', async () => {
     const calls: GenerateContentParameters[] = [];
     const client: GenAiClientLike = {
@@ -603,8 +638,32 @@ describe('agent chat service', () => {
           streamCalls.push(input);
 
           return (async function* () {
-            yield { text: 'Hel' };
-            yield { text: 'Hello' };
+            yield {
+              candidates: [
+                {
+                  content: {
+                    role: 'model',
+                    parts: [{ text: 'Hel' }],
+                  },
+                },
+              ],
+              get text() {
+                throw new Error('stream text getter should not be used');
+              },
+            };
+            yield {
+              candidates: [
+                {
+                  content: {
+                    role: 'model',
+                    parts: [{ text: 'Hello' }],
+                  },
+                },
+              ],
+              get text() {
+                throw new Error('stream text getter should not be used');
+              },
+            };
           })();
         },
       },

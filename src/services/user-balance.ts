@@ -821,6 +821,11 @@ export async function fetchWalletPortfolio(input: {
   }));
   const fetchPerpPositions =
     input.fetchPerpPositions ?? fetchUserPerpPositionsSnapshot;
+  const positionsPromise = fetchPerpPositions({
+    network: getNetworkConfig(input.network),
+    subaccountAddress: input.subaccountAddress,
+    perpPairs,
+  });
 
   const [
     accountInfo,
@@ -841,11 +846,7 @@ export async function fetchWalletPortfolio(input: {
     ),
     input.contracts.getOraclePriceAll(),
     input.contracts.assetPools(LENDING_MARKET_ID),
-    fetchPerpPositions({
-      network: getNetworkConfig(input.network),
-      walletAddress: input.walletAddress,
-      perpPairs,
-    }),
+    positionsPromise,
   ]);
 
   const oraclePriceBySymbol = new Map(

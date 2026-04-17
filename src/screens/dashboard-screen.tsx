@@ -4,10 +4,15 @@ import type { FC, ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { CandleChart } from '../components/chart/candle-chart';
-import { OrderbookPanel } from '../components/orderbook-panel';
+import {
+  type OrderBookLevel,
+  OrderbookPanel,
+  type TradeItem,
+} from '../components/orderbook-panel';
 import type { NetworkConfig } from '../config/networks';
 import {
   appendChatMessage,
+  appendOrderbookSnapshotMessage,
   type ChatMessage,
   getChatLoadingSegments,
   getMaxChatScrollOffset,
@@ -35,6 +40,7 @@ import {
   shouldCommandPaletteCaptureArrows,
 } from '../lib/dashboard-input';
 import { formatErrorMessage } from '../lib/error-format';
+import { formatLocalTimeOfDayWithSeconds } from '../lib/time';
 import {
   type AgentContinuation,
   type AgentStagedOrder,
@@ -262,6 +268,16 @@ export function getTranscriptMessageTrailingSpacing(
   }
 
   return 0;
+}
+
+export function shouldCloseActiveOrderbookOnEscape(input: {
+  composerValue: string;
+  outputView: OutputView;
+}) {
+  return (
+    input.composerValue.trim().length === 0 &&
+    input.outputView.kind === 'orderbook'
+  );
 }
 
 export const DashboardScreen: FC<DashboardScreenProps> = ({
@@ -700,6 +716,16 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     }
 
     if (key.escape) {
+      if (
+        shouldCloseActiveOrderbookOnEscape({
+          composerValue,
+          outputView,
+        })
+      ) {
+        closeActiveOrderbookWithSnapshot();
+        return;
+      }
+
       resetInputComposer();
       return;
     }
@@ -1041,6 +1067,27 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     setShellMode('pair-select');
   }
 
+  function closeActiveOrderbookWithSnapshot() {
+    if (outputView.kind !== 'orderbook') {
+      return;
+    }
+
+    setOutputView({ kind: 'empty' });
+    setChatMessages((messages) =>
+      appendOrderbookSnapshotMessage(messages, {
+        capturedAtLabel: formatLocalTimeOfDayWithSeconds(Date.now()),
+        pairLabel: currentPair.label,
+        latestPrice: priceLabel,
+        priceChange1h: currentOverview?.priceChange1h,
+        priceChange24h: currentOverview?.priceChange24h,
+        volume24h: currentOverview?.volume24h,
+        orderbook: cloneOrderbookSnapshot(orderbook),
+        trades: cloneTradeSnapshot(trades),
+        errorMessage: orderbookError,
+      }),
+    );
+  }
+
   function rememberInputHistory(rawValue: string) {
     const trimmedValue = rawValue.trim();
     if (!trimmedValue) {
@@ -1092,26 +1139,43 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
               )}
               marginBottom={getTranscriptMessageTrailingSpacing(message.role)}
             >
-              <Text
-                color={
-                  message.role === 'assistant'
-                    ? CHAT_ASSISTANT_COLOR
+              {message.kind === 'orderbook_snapshot' ? (
+                <OrderbookPanel
+                  status={{
+                    kind: 'snapshot',
+                    timeLabel: message.snapshot.capturedAtLabel,
+                  }}
+                  errorMessage={message.snapshot.errorMessage}
+                  latestPrice={message.snapshot.latestPrice}
+                  orderbook={message.snapshot.orderbook}
+                  pairLabel={message.snapshot.pairLabel}
+                  priceChange1h={message.snapshot.priceChange1h}
+                  priceChange24h={message.snapshot.priceChange24h}
+                  trades={message.snapshot.trades}
+                  volume24h={message.snapshot.volume24h}
+                />
+              ) : (
+                <Text
+                  color={
+                    message.role === 'assistant'
+                      ? CHAT_ASSISTANT_COLOR
+                      : message.role === 'command'
+                        ? COMMAND_TEXT_COLOR
+                        : CHAT_USER_COLOR
+                  }
+                >
+                  {message.role === 'assistant'
+                    ? 'AI> '
                     : message.role === 'command'
-                      ? COMMAND_TEXT_COLOR
-                      : CHAT_USER_COLOR
-                }
-              >
-                {message.role === 'assistant'
-                  ? 'AI> '
-                  : message.role === 'command'
-                    ? ''
-                    : 'You> '}
-                {message.role === 'command'
-                  ? renderCommandMessage(message.content)
-                  : message.role === 'assistant'
-                    ? renderAssistantMessage(message.content)
-                    : message.content}
-              </Text>
+                      ? ''
+                      : 'You> '}
+                  {message.role === 'command'
+                    ? renderCommandMessage(message.content)
+                    : message.role === 'assistant'
+                      ? renderAssistantMessage(message.content)
+                      : message.content}
+                </Text>
+              )}
             </Box>
           ))}
           {isChatLoading &&
@@ -1552,8 +1616,8 @@ function renderOutputView(input: {
   if (input.outputView.kind === 'orderbook') {
     return (
       <OrderbookPanel
+        status={{ kind: 'live', isConnected: input.isOrderbookConnected }}
         errorMessage={input.orderbookError}
-        isConnected={input.isOrderbookConnected}
         latestPrice={input.latestPrice}
         priceChange1h={input.priceChange1h}
         priceChange24h={input.priceChange24h}
@@ -1694,4 +1758,24 @@ function getAssistantMessageColor(part: string) {
   }
 
   return CHAT_ASSISTANT_COLOR;
+}
+
+function cloneOrderbookSnapshot(
+  orderbook: {
+    orderSellList?: OrderBookLevel[];
+    orderBuyList?: OrderBookLevel[];
+  } | null,
+) {
+  if (!orderbook) {
+    return null;
+  }
+
+  return {
+    orderSellList: orderbook.orderSellList?.map((level) => ({ ...level })),
+    orderBuyList: orderbook.orderBuyList?.map((level) => ({ ...level })),
+  };
+}
+
+function cloneTradeSnapshot(trades: TradeItem[]) {
+  return trades.map((trade) => ({ ...trade }));
 }

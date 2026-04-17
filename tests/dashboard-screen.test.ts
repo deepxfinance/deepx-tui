@@ -10,6 +10,7 @@ import {
   getTranscriptMessageTrailingSpacing,
   getWelcomeLogoFrames,
   getWorkspaceHeight,
+  shouldCloseActiveOrderbookOnEscape,
   WELCOME_LOGO_LINES,
 } from '../src/screens/dashboard-screen';
 import { buildHelpLines } from '../src/screens/help-screen';
@@ -175,6 +176,27 @@ describe('dashboard welcome logo', () => {
     expect(getTranscriptMessageTrailingSpacing('assistant')).toBe(1);
     expect(getTranscriptMessageTrailingSpacing('user')).toBe(0);
     expect(getTranscriptMessageTrailingSpacing('command')).toBe(0);
+  });
+
+  test('uses Esc to close an active orderbook only when the composer is empty', () => {
+    expect(
+      shouldCloseActiveOrderbookOnEscape({
+        composerValue: '',
+        outputView: { kind: 'orderbook' },
+      }),
+    ).toBe(true);
+    expect(
+      shouldCloseActiveOrderbookOnEscape({
+        composerValue: 'buy eth',
+        outputView: { kind: 'orderbook' },
+      }),
+    ).toBe(false);
+    expect(
+      shouldCloseActiveOrderbookOnEscape({
+        composerValue: '',
+        outputView: { kind: 'candle' },
+      }),
+    ).toBe(false);
   });
 
   test('renders the slash-command selector below the input bar', () => {

@@ -29,7 +29,7 @@ type StatusSegment = {
   bold: boolean;
 };
 
-type OrderBookLevel = {
+export type OrderBookLevel = {
   price: string;
   qty: string;
   value: string;
@@ -40,7 +40,7 @@ type OrderBookDisplayRow = {
   heatWidth: number;
 };
 
-type TradeItem = {
+export type TradeItem = {
   id?: string;
   price: string | number;
   qty?: string | number;
@@ -53,6 +53,10 @@ type TradeItem = {
   time?: string | number;
 };
 
+export type OrderbookPanelStatus =
+  | { kind: 'live'; isConnected: boolean }
+  | { kind: 'snapshot'; timeLabel: string };
+
 type OrderbookPanelProps = {
   pairLabel: string;
   latestPrice: string;
@@ -64,7 +68,7 @@ type OrderbookPanelProps = {
     orderBuyList?: OrderBookLevel[];
   } | null;
   trades: TradeItem[];
-  isConnected: boolean;
+  status?: OrderbookPanelStatus;
   errorMessage?: string;
   depth?: number;
   tradesDepth?: number;
@@ -78,7 +82,7 @@ export const OrderbookPanel: FC<OrderbookPanelProps> = ({
   volume24h,
   orderbook,
   trades,
-  isConnected,
+  status = { kind: 'live', isConnected: false },
   errorMessage,
   depth = DEFAULT_ORDERBOOK_DEPTH,
   tradesDepth = DEFAULT_TRADES_DEPTH,
@@ -95,7 +99,7 @@ export const OrderbookPanel: FC<OrderbookPanelProps> = ({
     () => getMidPriceLabel(orderbook, latestPrice),
     [latestPrice, orderbook],
   );
-  const statusSegments = getOrderbookStatusSegments(isConnected);
+  const statusSegments = getOrderbookStatusSegments(status);
   return (
     <Box
       borderStyle="round"
@@ -230,11 +234,23 @@ export const OrderbookPanel: FC<OrderbookPanelProps> = ({
 };
 
 export function getOrderbookStatusSegments(
-  isConnected: boolean,
+  status: OrderbookPanelStatus,
 ): StatusSegment[] {
-  const text = isConnected ? 'Live' : 'Connecting orderbook...';
+  if (status.kind === 'snapshot') {
+    return [
+      {
+        key: 'orderbook-status-snapshot',
+        text: `Snapshot ${status.timeLabel}`,
+        color: PANEL_TITLE_COLOR,
+        dimColor: false,
+        bold: false,
+      },
+    ];
+  }
 
-  if (!isConnected) {
+  const text = status.isConnected ? 'Live' : 'Connecting orderbook...';
+
+  if (!status.isConnected) {
     return text.split('').map((character, index) => ({
       key: `orderbook-status-${index}`,
       text: character,

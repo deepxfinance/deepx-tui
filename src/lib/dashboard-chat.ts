@@ -1,8 +1,33 @@
-export type ChatMessage = {
+import type { OrderBookLevel, TradeItem } from '../components/orderbook-panel';
+
+export type TextChatMessage = {
   id: string;
+  kind: 'text';
   role: 'assistant' | 'user' | 'command';
   content: string;
 };
+
+export type OrderbookSnapshotMessage = {
+  id: string;
+  kind: 'orderbook_snapshot';
+  role: 'command';
+  snapshot: {
+    capturedAtLabel: string;
+    pairLabel: string;
+    latestPrice: string;
+    priceChange1h?: number;
+    priceChange24h?: number;
+    volume24h?: number;
+    orderbook: {
+      orderSellList?: OrderBookLevel[];
+      orderBuyList?: OrderBookLevel[];
+    } | null;
+    trades: TradeItem[];
+    errorMessage?: string;
+  };
+};
+
+export type ChatMessage = TextChatMessage | OrderbookSnapshotMessage;
 
 import type { RuntimeNetwork } from '../config/networks';
 
@@ -45,14 +70,14 @@ export function createInitialChatMessages(): ChatMessage[] {
     createChatMessage(
       'assistant',
       'Set GEMINI_API_KEY or GOOGLE_API_KEY to enable live replies from gemini-3-flash-preview.',
-      [{ id: 'assistant-1', role: 'assistant', content: '' }],
+      [{ id: 'assistant-1', kind: 'text', role: 'assistant', content: '' }],
     ),
   ];
 }
 
 export function appendChatMessage(
   messages: ChatMessage[],
-  role: ChatMessage['role'],
+  role: TextChatMessage['role'],
   content: string,
 ): ChatMessage[] {
   const trimmedContent = content.trim();
@@ -60,8 +85,19 @@ export function appendChatMessage(
     return messages;
   }
 
-  return [...messages, createChatMessage(role, trimmedContent, messages)].slice(
-    -MAX_CHAT_MESSAGES,
+  return appendChatEntry(
+    messages,
+    createChatMessage(role, trimmedContent, messages),
+  );
+}
+
+export function appendOrderbookSnapshotMessage(
+  messages: ChatMessage[],
+  snapshot: OrderbookSnapshotMessage['snapshot'],
+): ChatMessage[] {
+  return appendChatEntry(
+    messages,
+    createOrderbookSnapshotMessage(snapshot, messages),
   );
 }
 
@@ -121,7 +157,10 @@ export function buildChatSystemPrompt(context: ChatPromptContext): string {
 
 export function buildGenAiContents(messages: ChatMessage[]) {
   return messages
-    .filter((message) => message.role !== 'command')
+    .filter(
+      (message): message is TextChatMessage =>
+        message.kind === 'text' && message.role !== 'command',
+    )
     .slice(-MAX_GENAI_HISTORY)
     .map((message) => ({
       role: message.role === 'assistant' ? 'model' : 'user',
@@ -130,15 +169,29 @@ export function buildGenAiContents(messages: ChatMessage[]) {
 }
 
 export function createChatMessage(
-  role: ChatMessage['role'],
+  role: TextChatMessage['role'],
   content: string,
   messages: ChatMessage[],
-): ChatMessage {
+): TextChatMessage {
   const nextId = getNextMessageId(messages);
   return {
     id: `${role}-${nextId}`,
+    kind: 'text',
     role,
     content,
+  };
+}
+
+export function createOrderbookSnapshotMessage(
+  snapshot: OrderbookSnapshotMessage['snapshot'],
+  messages: ChatMessage[],
+): OrderbookSnapshotMessage {
+  const nextId = getNextMessageId(messages);
+  return {
+    id: `orderbook-snapshot-${nextId}`,
+    kind: 'orderbook_snapshot',
+    role: 'command',
+    snapshot,
   };
 }
 
@@ -181,6 +234,10 @@ function getNextMessageId(messages: ChatMessage[]): number {
   const lastId = messages.at(-1)?.id ?? 'assistant-0';
   const suffix = Number(lastId.split('-').at(-1) ?? 0);
   return Number.isFinite(suffix) ? suffix + 1 : messages.length + 1;
+}
+
+function appendChatEntry(messages: ChatMessage[], nextMessage: ChatMessage) {
+  return [...messages, nextMessage].slice(-MAX_CHAT_MESSAGES);
 }
 
 function getShimmerColor(
