@@ -224,6 +224,72 @@ describe('agent chat service', () => {
     });
   });
 
+  test('does not touch the SDK text getter for function-call-only responses', async () => {
+    const calls: GenerateContentParameters[] = [];
+    const client: GenAiClientLike = {
+      models: {
+        async generateContent(input) {
+          calls.push(input);
+
+          if (calls.length === 1) {
+            return {
+              candidates: [
+                {
+                  content: {
+                    role: 'model',
+                    parts: [
+                      {
+                        functionCall: {
+                          id: 'call-no-text',
+                          name: 'deepx_list_open_orders',
+                          args: {},
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+              functionCalls: [
+                {
+                  id: 'call-no-text',
+                  name: 'deepx_list_open_orders',
+                  args: {},
+                },
+              ],
+              get text() {
+                throw new Error('text getter should not be used');
+              },
+            };
+          }
+
+          return {
+            text: 'Handled without SDK text warnings.',
+          };
+        },
+      },
+    };
+
+    const result = await requestAgentChat({
+      messages: [
+        {
+          id: 'user-1',
+          role: 'user',
+          content: 'Check open orders without warning text.',
+        },
+      ],
+      context: {
+        network: 'deepx_devnet',
+        pairLabel: 'BTC-USDC',
+        priceLabel: '68250.40',
+        walletUnlocked: true,
+      },
+      client,
+    });
+
+    expect(result).toBe('Handled without SDK text warnings.');
+    expect(calls).toHaveLength(2);
+  });
+
   test('returns structured tool errors to the model instead of aborting', async () => {
     const calls: GenerateContentParameters[] = [];
     const client: GenAiClientLike = {

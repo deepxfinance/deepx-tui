@@ -383,11 +383,11 @@ async function requestAgentModelResponse(input: {
 }
 
 function resolveResponseText(response: GenAiResponseLike) {
-  const candidateText = (response.candidates?.[0]?.content?.parts ?? [])
-    .map((part) => (typeof part.text === 'string' ? part.text : ''))
-    .join('');
-  if (candidateText) {
-    return candidateText;
+  const candidateParts = response.candidates?.[0]?.content?.parts;
+  if (candidateParts) {
+    return candidateParts
+      .map((part) => (typeof part.text === 'string' ? part.text : ''))
+      .join('');
   }
 
   return response.text ?? '';

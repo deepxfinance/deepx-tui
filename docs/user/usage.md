@@ -49,6 +49,7 @@ Set `GEMINI_API_KEY` or `GOOGLE_API_KEY` before launch if you want live AI chat 
 - the dashboard shows open perp positions for the unlocked wallet in a dedicated lower panel
 - the `/orderbook` workspace now shows the live ladder, latest trades, and compact 1h/24h price and volume stats in the header
 - pressing `Esc` with an empty composer while `/orderbook` is active closes the live workspace and appends a frozen `Snapshot HH:MM:SS` card to the transcript
+- typing new input into an empty composer while `/orderbook` is active also closes the live workspace and appends the same frozen snapshot card before returning focus to chat
 - no MCP server is required for the dashboard chat flow
 - typing `/` in the shell input opens a live command selector and filters matching slash commands as you type
 
@@ -65,6 +66,7 @@ Set `GEMINI_API_KEY` or `GOOGLE_API_KEY` before launch if you want live AI chat 
 - `backspace` deletes before the cursor and `delete` deletes at the cursor
 - `ctrl+w` deletes the previous word, `ctrl+u` clears before the cursor, and `ctrl+k` clears after it
 - `esc` skips wallet boot, clears the slash selector, cancels a pending confirmation or passphrase prompt, exits pair selection back to the input bar, or closes an active `/orderbook` workspace into a transcript snapshot when the composer is empty
+- typing any new chat input while the composer is empty closes an active `/orderbook` workspace into a transcript snapshot before the new text appears
 - `up` and `down` move through the pair picker after `/candle` or `/orderbook`
 - `up` and `down` move through the slash-command selector while it is filtering partial matches; once the input is an exact slash command such as `/orderbook`, `up` and `down` return to history recall
 - `pageup` and `pagedown` scroll the chat transcript without snapping back to the newest reply

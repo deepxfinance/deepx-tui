@@ -9,7 +9,9 @@ import {
   getTranscriptMessageSpacing,
   getTranscriptMessageTrailingSpacing,
   getWelcomeLogoFrames,
+  getWorkspaceDismissActionOnComposerInput,
   getWorkspaceHeight,
+  shouldAppendCommandMessageImmediately,
   shouldCloseActiveOrderbookOnEscape,
   WELCOME_LOGO_LINES,
 } from '../src/screens/dashboard-screen';
@@ -149,6 +151,12 @@ describe('dashboard welcome logo', () => {
     ]);
   });
 
+  test('logs help immediately but defers pair-based commands until selection', () => {
+    expect(shouldAppendCommandMessageImmediately('help')).toBe(true);
+    expect(shouldAppendCommandMessageImmediately('orderbook')).toBe(false);
+    expect(shouldAppendCommandMessageImmediately('candle')).toBe(false);
+  });
+
   test('dashboard help content includes the slash command summary', () => {
     expect(buildHelpLines('deepx')).toContain(
       '- /help: show this help summary inside the dashboard',
@@ -197,6 +205,41 @@ describe('dashboard welcome logo', () => {
         outputView: { kind: 'candle' },
       }),
     ).toBe(false);
+  });
+
+  test('snapshots the orderbook workspace when typing into an empty composer', () => {
+    expect(
+      getWorkspaceDismissActionOnComposerInput({
+        composerValue: '',
+        outputView: { kind: 'orderbook' },
+        typedInput: 'b',
+        hasModifier: false,
+      }),
+    ).toBe('snapshot');
+    expect(
+      getWorkspaceDismissActionOnComposerInput({
+        composerValue: '',
+        outputView: { kind: 'candle' },
+        typedInput: 'b',
+        hasModifier: false,
+      }),
+    ).toBe('close');
+    expect(
+      getWorkspaceDismissActionOnComposerInput({
+        composerValue: 'buy',
+        outputView: { kind: 'orderbook' },
+        typedInput: 'x',
+        hasModifier: false,
+      }),
+    ).toBe('none');
+    expect(
+      getWorkspaceDismissActionOnComposerInput({
+        composerValue: '',
+        outputView: { kind: 'orderbook' },
+        typedInput: 'x',
+        hasModifier: true,
+      }),
+    ).toBe('none');
   });
 
   test('renders the slash-command selector below the input bar', () => {

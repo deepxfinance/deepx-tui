@@ -280,6 +280,35 @@ export function shouldCloseActiveOrderbookOnEscape(input: {
   );
 }
 
+export function getWorkspaceDismissActionOnComposerInput(input: {
+  composerValue: string;
+  outputView: OutputView;
+  typedInput: string;
+  hasModifier: boolean;
+}) {
+  if (
+    input.hasModifier ||
+    input.typedInput.length === 0 ||
+    input.composerValue.length > 0
+  ) {
+    return 'none' as const;
+  }
+
+  if (input.outputView.kind === 'orderbook') {
+    return 'snapshot' as const;
+  }
+
+  if (input.outputView.kind === 'candle') {
+    return 'close' as const;
+  }
+
+  return 'none' as const;
+}
+
+export function shouldAppendCommandMessageImmediately(command: ShellCommand) {
+  return command === 'help';
+}
+
 export const DashboardScreen: FC<DashboardScreenProps> = ({
   marketSession,
   mode,
@@ -770,10 +799,16 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     }
 
     if (!hasModifier && input.length > 0) {
-      if (
-        composerValue.length === 0 &&
-        (outputView.kind === 'candle' || outputView.kind === 'orderbook')
-      ) {
+      const workspaceDismissAction = getWorkspaceDismissActionOnComposerInput({
+        composerValue,
+        outputView,
+        typedInput: input,
+        hasModifier,
+      });
+
+      if (workspaceDismissAction === 'snapshot') {
+        closeActiveOrderbookWithSnapshot();
+      } else if (workspaceDismissAction === 'close') {
         setOutputView({ kind: 'empty' });
       }
 
@@ -1050,9 +1085,12 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     rememberInputHistory(`/${command}`);
     resetInputComposer();
     setCommandPaletteIndex(0);
-    setChatMessages((messages) =>
-      appendChatMessage(messages, 'command', `/${command}`),
-    );
+
+    if (shouldAppendCommandMessageImmediately(command)) {
+      setChatMessages((messages) =>
+        appendChatMessage(messages, 'command', `/${command}`),
+      );
+    }
 
     if (command === 'help') {
       setOutputView({ kind: 'help' });
@@ -1165,7 +1203,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
                   }
                 >
                   {message.role === 'assistant'
-                    ? 'AI> '
+                    ? 'Gemini> '
                     : message.role === 'command'
                       ? ''
                       : 'You> '}
@@ -1190,7 +1228,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
               marginBottom={getTranscriptMessageTrailingSpacing('assistant')}
             >
               <Text color={CHAT_ASSISTANT_COLOR}>
-                AI&gt; {renderAssistantMessage(streamingAssistantReply)}
+                Gemini&gt; {renderAssistantMessage(streamingAssistantReply)}
               </Text>
             </Box>
           ) : null}
@@ -1205,7 +1243,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
               )}
             >
               <Text color={CHAT_ASSISTANT_COLOR}>
-                AI&gt;{' '}
+                Gemini&gt;{' '}
                 {getChatLoadingSegments(chatLoadingFrame).map((segment) => (
                   <Text
                     key={segment.key}

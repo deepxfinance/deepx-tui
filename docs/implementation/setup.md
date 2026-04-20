@@ -53,6 +53,7 @@ bun test
 - the shell is chat-first and uses slash commands for market views
 - `/candle` and `/orderbook` first require pair selection, then reuse live market data streams for the chosen pair
 - pressing `Esc` with an empty composer while `/orderbook` is active closes the live workspace and stores a frozen `Snapshot HH:MM:SS` orderbook card in the transcript
+- typing new input into an empty composer while `/orderbook` is active now follows the same snapshot path before returning the shell to chat entry
 - debug mode captures HTTP market requests, RPC transaction submissions, websocket events, and wallet/chat lifecycle events in the shared logger
 - debug mode also appends captured log entries to `~/.local/state/deepx/logs/debug.log` by default; set `DEEPX_DEBUG_LOG_FILE` to override the file path
 - default mode keeps the shared logger at warn/error level to avoid constant websocket logging overhead
