@@ -5,7 +5,7 @@ import { useMemo } from 'react';
 import { padRight } from '../lib/format';
 import { formatLocalTimeOfDayWithMilliseconds } from '../lib/time';
 
-const SELL_COLOR = '#FF3131';
+const SELL_COLOR = '#ff7373';
 const BUY_COLOR = '#28DE9C';
 const SELL_BAR_COLOR = '#3E0F15';
 const BUY_BAR_COLOR = '#0D3B2D';
@@ -164,7 +164,7 @@ export const OrderbookPanel: FC<OrderbookPanelProps> = ({
               marginRight={ORDERBOOK_SIDE_GAP}
             >
               <Box width={ORDERBOOK_TABLE_WIDTH} justifyContent="flex-end">
-                <Text color={MUTED_COLOR}>{getOrderbookHeaderRow()}</Text>
+                <Text color={MUTED_COLOR}>{getOrderbookHeaderRow('bid')}</Text>
               </Box>
               {rows.bids.map((row, index) => (
                 <Box
@@ -186,7 +186,7 @@ export const OrderbookPanel: FC<OrderbookPanelProps> = ({
             </Box>
             <Box flexDirection="column" width={ORDERBOOK_TABLE_WIDTH}>
               <Box width={ORDERBOOK_TABLE_WIDTH}>
-                <Text color={MUTED_COLOR}>{getOrderbookHeaderRow()}</Text>
+                <Text color={MUTED_COLOR}>{getOrderbookHeaderRow('ask')}</Text>
               </Box>
               {rows.asks.map((row, index) => (
                 <Box
@@ -289,14 +289,14 @@ export function buildOrderBookColumns(
     asks: padRows(
       [...(orderbook.orderSellList ?? [])]
         .slice(0, depth)
-        .map(formatOrderBookRow),
+        .map((item) => formatOrderBookRow(item, 'ask')),
       depth,
       'start',
     ),
     bids: padRows(
       [...(orderbook.orderBuyList ?? [])]
         .slice(0, depth)
-        .map(formatOrderBookRow),
+        .map((item) => formatOrderBookRow(item, 'bid')),
       depth,
       'start',
     ),
@@ -339,6 +339,7 @@ export function buildOrderBookDisplayRows(
           item,
           askCumulativeQuantities[index] ?? 0,
           maxAskQty,
+          'ask',
         ),
       ),
       depth,
@@ -350,6 +351,7 @@ export function buildOrderBookDisplayRows(
           item,
           bidCumulativeQuantities[index] ?? 0,
           maxBidQty,
+          'bid',
         ),
       ),
       depth,
@@ -362,12 +364,16 @@ export function buildOrderBookRowKey(side: 'ask' | 'bid', index: number) {
   return `${side}-${index}`;
 }
 
-export function getOrderbookHeaderRow() {
+export function getOrderbookHeaderRow(side: 'ask' | 'bid' = 'ask') {
+  if (side === 'bid') {
+    return `${padRight('TOTAL', 11)}${padRight('SIZE', 10)}PRICE`;
+  }
+
   return `${padRight('PRICE', 11)}${padRight('SIZE', 10)}TOTAL`;
 }
 
 export function getTradesHeaderRow() {
-  return `${padRight('TIME', 13)}${padRight('PRICE', 9)}SIZE`;
+  return `${padRight('TIME', 14)}${padRight('PRICE', 10)}SIZE`;
 }
 
 export function calculateOrderBookHeatWidth(
@@ -436,7 +442,14 @@ function padOrderBookDisplayRows(
   return align === 'end' ? [...blanks, ...rows] : [...rows, ...blanks];
 }
 
-function formatOrderBookRow(item: OrderBookLevel) {
+function formatOrderBookRow(item: OrderBookLevel, side: 'ask' | 'bid') {
+  if (side === 'bid') {
+    return `${padRight(formatCompactDecimal(item.value, 2), 11)}${padRight(
+      formatCompactDecimal(item.qty, 3),
+      10,
+    )}${formatCompactDecimal(item.price, 2)}`;
+  }
+
   return `${padRight(formatCompactDecimal(item.price, 2), 11)}${padRight(
     formatCompactDecimal(item.qty, 3),
     10,
@@ -447,8 +460,9 @@ function buildOrderBookDisplayRow(
   item: OrderBookLevel,
   cumulativeQuantity: number,
   maxQuantity: number,
+  side: 'ask' | 'bid',
 ): OrderBookDisplayRow {
-  const text = formatOrderBookRow(item);
+  const text = formatOrderBookRow(item, side);
   return {
     text,
     heatWidth: calculateOrderBookHeatWidth(
@@ -500,9 +514,9 @@ function padTradeRows(
 }
 
 function formatTradeRow(trade: TradeItem) {
-  return `${padRight(formatTradeTime(trade), 13)}${padRight(
+  return `${padRight(formatTradeTime(trade), 14)}${padRight(
     formatCompactDecimal(trade.price, 2),
-    9,
+    10,
   )}${formatCompactDecimal(resolveTradeSize(trade), 3)}`;
 }
 

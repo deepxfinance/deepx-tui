@@ -40,8 +40,8 @@ describe('orderbook panel', () => {
       '102.00     0.800     81.60',
     ]);
     expect(columns.bids).toEqual([
-      '99.00      2.000     198.00',
-      '98.00      1.500     147.00',
+      '198.00     2.000     99.00',
+      '147.00     1.500     98.00',
     ]);
   });
 
@@ -104,7 +104,7 @@ describe('orderbook panel', () => {
       { text: '102.00     4.000     408.00', heatWidth: 31 },
     ]);
     expect(rows.bids).toEqual([
-      { text: '99.00      2.000     198.00', heatWidth: 21 },
+      { text: '198.00     2.000     99.00', heatWidth: 21 },
       { text: '98.00      1.000     98.00', heatWidth: 31 },
     ]);
   });
@@ -158,8 +158,8 @@ describe('orderbook panel', () => {
           2,
         ),
       ).toEqual([
-        { value: '11:00:00.000 99.50    0.450', isBuy: true },
-        { value: '11:00:05.000 99.25    0.100', isBuy: false },
+        { value: '11:00:00.000  99.50     0.450', isBuy: true },
+        { value: '11:00:05.000  99.25     0.100', isBuy: false },
       ]);
     } finally {
       Intl.DateTimeFormat.prototype.resolvedOptions = originalResolvedOptions;
@@ -194,12 +194,13 @@ describe('orderbook panel', () => {
     expect(getPriceChangeColor(undefined)).toBe('gray');
     expect(getPriceChangeColor(0)).toBe('gray');
     expect(getPriceChangeColor(1.5)).toBe('#28DE9C');
-    expect(getPriceChangeColor(-1.5)).toBe('#FF3131');
+    expect(getPriceChangeColor(-1.5)).toBe('#ff7373');
   });
 
   test('pads table headers to the same columns as the data rows', () => {
-    expect(getOrderbookHeaderRow()).toBe('PRICE      SIZE      TOTAL');
-    expect(getTradesHeaderRow()).toBe('TIME         PRICE    SIZE');
+    expect(getOrderbookHeaderRow('ask')).toBe('PRICE      SIZE      TOTAL');
+    expect(getOrderbookHeaderRow('bid')).toBe('TOTAL      SIZE      PRICE');
+    expect(getTradesHeaderRow()).toBe('TIME          PRICE     SIZE');
   });
 
   test('calculates mid price from the best bid and best ask', () => {
