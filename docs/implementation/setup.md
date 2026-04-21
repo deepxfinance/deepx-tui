@@ -47,6 +47,7 @@ bun test
 - Market ids are network-specific: perp ids come from `/v2/market/perp/markets`, while spot ids come from `/v2/market/spot/markets` and use the bytes32 `pair` value rather than the numeric perp market id
 - The terminal now loads market metadata from the selected backend APIs on demand and caches it per network in-process for the current session
 - The app now starts a shared market websocket session as soon as the selected network boots and reuses it for orderbook consumers instead of opening duplicate sockets
+- The shared market websocket session automatically reconnects after disconnects and re-sends active subscriptions on the next live socket
 - AI chat resumes after user confirmation or cancellation by sending the local action result back to the model as a tool response
 - AI chat now routes live order cancellation, position close, TP/SL updates, and subaccount creation through the confirmation gate instead of leaving them permanently blocked
 - trade commands entered in chat now go through the DeepX agent instead of a local parser shortcut

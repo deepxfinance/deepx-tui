@@ -4,7 +4,7 @@ import { logSocketEvent } from './logger';
 const WEBSOCKET_CONNECTING_STATE = 0;
 const WEBSOCKET_OPEN_STATE = 1;
 const HEARTBEAT_INTERVAL_MS = 15_000;
-const RECONNECT_DELAY_MS = 1_000;
+const DEFAULT_RECONNECT_DELAY_MS = 1_000;
 
 type WebSocketLike = {
   readyState: number;
@@ -64,13 +64,21 @@ const sharedSessions = new Map<string, SharedSessionRecord>();
 export function createMarketWsSession(input: {
   network: NetworkConfig;
   createWebSocket?: CreateWebSocket;
+  reconnectDelayMs?: number;
 }): MarketWsSession {
-  return new SharedMarketWsSession(input.network, input.createWebSocket);
+  return new SharedMarketWsSession(
+    input.network,
+    input.createWebSocket,
+    input.reconnectDelayMs,
+  );
 }
 
 export function acquireSharedMarketWsSession(
   network: NetworkConfig,
-  options: { createWebSocket?: CreateWebSocket } = {},
+  options: {
+    createWebSocket?: CreateWebSocket;
+    reconnectDelayMs?: number;
+  } = {},
 ): MarketWsSession {
   const key = network.marketWsUrl;
   const existing = sharedSessions.get(key);
@@ -79,7 +87,11 @@ export function acquireSharedMarketWsSession(
     return existing.session;
   }
 
-  const session = new SharedMarketWsSession(network, options.createWebSocket);
+  const session = new SharedMarketWsSession(
+    network,
+    options.createWebSocket,
+    options.reconnectDelayMs,
+  );
   sharedSessions.set(key, {
     refCount: 1,
     session,
@@ -119,6 +131,7 @@ class SharedMarketWsSession implements MarketWsSession {
   readonly network: NetworkConfig;
 
   private readonly createWebSocket: CreateWebSocket;
+  private readonly reconnectDelayMs: number;
   private readonly subscriptions = new Map<string, SubscriptionRecord>();
   private readonly statusListeners = new Set<
     (snapshot: MarketWsSessionSnapshot) => void
@@ -134,9 +147,14 @@ class SharedMarketWsSession implements MarketWsSession {
   private sentSubscriptionKeys = new Set<string>();
   private isClosedManually = false;
 
-  constructor(network: NetworkConfig, createWebSocket?: CreateWebSocket) {
+  constructor(
+    network: NetworkConfig,
+    createWebSocket?: CreateWebSocket,
+    reconnectDelayMs = DEFAULT_RECONNECT_DELAY_MS,
+  ) {
     this.network = network;
     this.createWebSocket = createWebSocket ?? createBrowserWebSocket;
+    this.reconnectDelayMs = reconnectDelayMs;
     this.ensureConnected();
   }
 
@@ -223,12 +241,17 @@ class SharedMarketWsSession implements MarketWsSession {
     }
 
     this.clearReconnect();
-    this.websocket = this.createWebSocket(this.network.marketWsUrl);
+    const websocket = this.createWebSocket(this.network.marketWsUrl);
+    this.websocket = websocket;
     this.sentSubscriptionKeys.clear();
     this.pendingPingAt = null;
     this.setStatus('connecting');
 
-    this.websocket.addEventListener('open', () => {
+    websocket.addEventListener('open', () => {
+      if (this.websocket !== websocket) {
+        return;
+      }
+
       this.setStatus('open');
       this.startHeartbeat();
       logSocketEvent({
@@ -243,7 +266,11 @@ class SharedMarketWsSession implements MarketWsSession {
       this.emitLifecycle('onOpen');
     });
 
-    this.websocket.addEventListener('message', (event) => {
+    websocket.addEventListener('message', (event) => {
+      if (this.websocket !== websocket) {
+        return;
+      }
+
       const rawMessage = String(event.data);
       logSocketEvent({
         scope: 'shared-market-ws',
@@ -266,7 +293,11 @@ class SharedMarketWsSession implements MarketWsSession {
       }
     });
 
-    this.websocket.addEventListener('close', () => {
+    websocket.addEventListener('close', () => {
+      if (this.websocket !== websocket) {
+        return;
+      }
+
       logSocketEvent({
         scope: 'shared-market-ws',
         url: this.network.marketWsUrl,
@@ -275,7 +306,11 @@ class SharedMarketWsSession implements MarketWsSession {
       this.handleDisconnect('closed', 'onClose');
     });
 
-    this.websocket.addEventListener('error', () => {
+    websocket.addEventListener('error', () => {
+      if (this.websocket !== websocket) {
+        return;
+      }
+
       logSocketEvent({
         scope: 'shared-market-ws',
         url: this.network.marketWsUrl,
@@ -310,7 +345,7 @@ class SharedMarketWsSession implements MarketWsSession {
     this.reconnectHandle = setTimeout(() => {
       this.reconnectHandle = undefined;
       this.ensureConnected();
-    }, RECONNECT_DELAY_MS);
+    }, this.reconnectDelayMs);
   }
 
   private clearReconnect() {

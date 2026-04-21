@@ -146,7 +146,72 @@ describe('market-ws-session', () => {
 
     session.close();
   });
+
+  test('reconnects automatically and re-sends active subscriptions', async () => {
+    const sockets: MockWebSocket[] = [];
+    const session = createMarketWsSession({
+      network: getNetworkConfig('devnet'),
+      reconnectDelayMs: 0,
+      createWebSocket(url) {
+        const socket = new MockWebSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    const receivedMessages: string[] = [];
+    session.subscribe({
+      key: 'positions:wallet:3,4',
+      payload: JSON.stringify({
+        action: 'multi_subscribe',
+        subscriptions: ['a'],
+      }),
+      scope: 'positions-ws',
+      onMessage(rawMessage) {
+        receivedMessages.push(rawMessage);
+      },
+    });
+
+    const firstSocket = sockets[0];
+    if (!firstSocket) {
+      throw new Error('Expected websocket to be created');
+    }
+
+    firstSocket.open();
+    expect(firstSocket.sent).toHaveLength(2);
+
+    firstSocket.close();
+    await waitForReconnect();
+
+    expect(sockets).toHaveLength(2);
+    const secondSocket = sockets[1];
+    if (!secondSocket) {
+      throw new Error('Expected websocket to reconnect');
+    }
+
+    secondSocket.open();
+
+    expect(secondSocket.sent).toHaveLength(2);
+    expect(JSON.parse(secondSocket.sent[0] ?? '{}')).toEqual({
+      action: 'multi_subscribe',
+      subscriptions: ['a'],
+    });
+    expect(JSON.parse(secondSocket.sent[1] ?? '{}')).toEqual({
+      action: 'ping',
+    });
+
+    firstSocket.message(JSON.stringify({ channel: 'stale' }));
+    secondSocket.message(JSON.stringify({ channel: 'fresh' }));
+
+    expect(receivedMessages).toEqual([JSON.stringify({ channel: 'fresh' })]);
+
+    session.close();
+  });
 });
+
+function waitForReconnect() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 class MockWebSocket {
   readyState = 0;
@@ -182,6 +247,14 @@ class MockWebSocket {
   open() {
     this.readyState = 1;
     this.emit('open');
+  }
+
+  error() {
+    this.emit('error');
+  }
+
+  message(data: unknown) {
+    this.emit('message', { data });
   }
 
   private emit(type: string, event?: { data?: unknown }) {

@@ -11,6 +11,7 @@ import {
   getWelcomeLogoFrames,
   getWorkspaceDismissActionOnComposerInput,
   getWorkspaceHeight,
+  renderOutputView,
   shouldAppendCommandMessageImmediately,
   shouldCloseActiveOrderbookOnEscape,
   WELCOME_LOGO_LINES,
@@ -117,6 +118,35 @@ describe('dashboard welcome logo', () => {
       { text: '/', color: 'gray' },
       { text: 'orderbook', color: '#AAB6FF' },
     ]);
+  });
+
+  test('does not forward orderbook errors into the orderbook panel', () => {
+    const view = renderOutputView({
+      outputView: { kind: 'orderbook' },
+      currentPair: {
+        kind: 'perp',
+        label: 'BTC-PERP',
+        pairId: 'BTC-PERP',
+        priceDecimal: 2,
+        orderDecimal: 3,
+        baseDecimals: 8,
+        baseSymbol: 'BTC',
+        quoteSymbol: 'USD',
+      },
+      candles: [],
+      candleStreamStatus: 'stale',
+      latestPrice: '100.00',
+      orderbook: null,
+      trades: [],
+      isOrderbookConnected: false,
+      orderbookError: 'Orderbook stream unavailable',
+      resolution: '1m',
+      resolutionLabel: '1m',
+      width: 120,
+      height: 40,
+    });
+
+    expect(view.props.errorMessage).toBeUndefined();
   });
 
   test('highlights submitted order assistant messages for terminal readability', () => {

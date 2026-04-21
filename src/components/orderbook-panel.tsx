@@ -69,7 +69,6 @@ type OrderbookPanelProps = {
   } | null;
   trades: TradeItem[];
   status?: OrderbookPanelStatus;
-  errorMessage?: string;
   depth?: number;
   tradesDepth?: number;
 };
@@ -83,7 +82,6 @@ export const OrderbookPanel: FC<OrderbookPanelProps> = ({
   orderbook,
   trades,
   status = { kind: 'live', isConnected: false },
-  errorMessage,
   depth = DEFAULT_ORDERBOOK_DEPTH,
   tradesDepth = DEFAULT_TRADES_DEPTH,
 }) => {
@@ -229,7 +227,6 @@ export const OrderbookPanel: FC<OrderbookPanelProps> = ({
           ))}
         </Box>
       </Box>
-      {errorMessage ? <Text color={SELL_COLOR}>{errorMessage}</Text> : null}
     </Box>
   );
 };

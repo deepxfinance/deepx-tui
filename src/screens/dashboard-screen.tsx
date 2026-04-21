@@ -1202,7 +1202,6 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
                     kind: 'snapshot',
                     timeLabel: message.snapshot.capturedAtLabel,
                   }}
-                  errorMessage={message.snapshot.errorMessage}
                   latestPrice={message.snapshot.latestPrice}
                   orderbook={message.snapshot.orderbook}
                   pairLabel={message.snapshot.pairLabel}
@@ -1634,7 +1633,7 @@ const AgentActionPanel: FC<AgentActionPanelProps> = ({
   );
 };
 
-function renderOutputView(input: {
+export function renderOutputView(input: {
   outputView: OutputView;
   currentPair: MarketPair;
   candles: Parameters<typeof CandleChart>[0]['candles'];
@@ -1674,7 +1673,6 @@ function renderOutputView(input: {
     return (
       <OrderbookPanel
         status={{ kind: 'live', isConnected: input.isOrderbookConnected }}
-        errorMessage={input.orderbookError}
         latestPrice={input.latestPrice}
         priceChange1h={input.priceChange1h}
         priceChange24h={input.priceChange24h}
