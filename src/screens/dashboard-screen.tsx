@@ -334,7 +334,7 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
   const [shellMode, setShellMode] = useState<ShellMode>('chat');
   const [pairPickerIndex, setPairPickerIndex] = useState(0);
   const [pendingCommand, setPendingCommand] = useState<
-    Exclude<ShellCommand, 'help'> | undefined
+    Exclude<ShellCommand, 'help' | 'new'> | undefined
   >();
   const [outputView, setOutputView] = useState<OutputView>(() =>
     getInitialOutputView(mode),
@@ -1086,6 +1086,11 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     resetInputComposer();
     setCommandPaletteIndex(0);
 
+    if (command === 'new') {
+      resetChatThread();
+      return;
+    }
+
     if (shouldAppendCommandMessageImmediately(command)) {
       setChatMessages((messages) =>
         appendChatMessage(messages, 'command', `/${command}`),
@@ -1103,6 +1108,20 @@ export const DashboardScreen: FC<DashboardScreenProps> = ({
     setPendingCommand(command);
     setPairPickerIndex(0);
     setShellMode('pair-select');
+  }
+
+  function resetChatThread() {
+    setShellMode('chat');
+    setPendingCommand(undefined);
+    setPairPickerIndex(0);
+    setOutputView({ kind: 'empty' });
+    setChatMessages([]);
+    setTranscriptScrollOffset(0);
+    setPendingChatTrade(undefined);
+    setTransactionConfirmationIndex(0);
+    clearPendingAgentAction();
+    setIsChatLoading(false);
+    setStreamingAssistantReply('');
   }
 
   function closeActiveOrderbookWithSnapshot() {
@@ -1392,7 +1411,7 @@ const WelcomePanel: FC<WelcomePanelProps> = ({
           <Text color="gray">
             {walletAddress ? `Wallet: ${walletAddress}` : 'Wallet: not loaded'}
           </Text>
-          <Text color="gray">Commands: /candle /orderbook /help</Text>
+          <Text color="gray">Commands: /candle /orderbook /help /new</Text>
           <Text color="gray">
             Use Enter to submit. Use Esc to leave pair selection.
           </Text>

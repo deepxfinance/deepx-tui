@@ -52,13 +52,14 @@ Set `GEMINI_API_KEY` or `GOOGLE_API_KEY` before launch if you want live AI chat 
 - typing new input into an empty composer while `/orderbook` is active also closes the live workspace and appends the same frozen snapshot card before returning focus to chat
 - no MCP server is required for the dashboard chat flow
 - typing `/` in the shell input opens a live command selector and filters matching slash commands as you type
+- `/new` clears the visible transcript and starts the next prompt in a fresh chat thread
 
 ## Shell Keys
 
 - `q` quit
 - type into the bottom input bar for chat or slash commands
 - typing `/` opens the command selector immediately
-- `/candle`, `/orderbook`, and `/help` are the supported commands
+- `/candle`, `/orderbook`, `/help`, and `/new` are the supported commands
 - `enter` submits input, confirms the selected pair, activates a confirmation selector action, or submits a masked passphrase prompt
 - `up` and `down` recall recent input unless the pair picker or a partial slash-command selector is active
 - `left` and `right` move the input cursor; use `ctrl` or `meta` with arrows to jump by word

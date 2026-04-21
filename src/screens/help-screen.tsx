@@ -20,6 +20,7 @@ export function buildHelpLines(commandName: string): string[] {
     'Workspace commands:',
     '- /orderbook: open the live orderbook ladder for a selected pair',
     '- /help: show this help summary inside the dashboard',
+    '- /new: clear the transcript and start a fresh chat thread',
     '',
     'Keys:',
     '- q or Esc: quit',

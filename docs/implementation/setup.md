@@ -51,6 +51,7 @@ bun test
 - AI chat now routes live order cancellation, position close, TP/SL updates, and subaccount creation through the confirmation gate instead of leaving them permanently blocked
 - trade commands entered in chat now go through the DeepX agent instead of a local parser shortcut
 - the shell is chat-first and uses slash commands for market views
+- `/new` clears the visible transcript and resets the in-memory chat thread so the next prompt starts fresh
 - `/candle` and `/orderbook` first require pair selection, then reuse live market data streams for the chosen pair
 - pressing `Esc` with an empty composer while `/orderbook` is active closes the live workspace and stores a frozen `Snapshot HH:MM:SS` orderbook card in the transcript
 - typing new input into an empty composer while `/orderbook` is active now follows the same snapshot path before returning the shell to chat entry

@@ -155,11 +155,15 @@ describe('dashboard welcome logo', () => {
     expect(shouldAppendCommandMessageImmediately('help')).toBe(true);
     expect(shouldAppendCommandMessageImmediately('orderbook')).toBe(false);
     expect(shouldAppendCommandMessageImmediately('candle')).toBe(false);
+    expect(shouldAppendCommandMessageImmediately('new')).toBe(false);
   });
 
   test('dashboard help content includes the slash command summary', () => {
     expect(buildHelpLines('deepx')).toContain(
       '- /help: show this help summary inside the dashboard',
+    );
+    expect(buildHelpLines('deepx')).toContain(
+      '- /new: clear the transcript and start a fresh chat thread',
     );
     expect(buildHelpLines('deepx')).toContain(
       '- optional debug mode writes expanded logs to a local debug file',

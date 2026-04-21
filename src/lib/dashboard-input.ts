@@ -1,6 +1,6 @@
 import { truncateMiddle } from './format';
 
-export type ShellCommand = 'candle' | 'orderbook' | 'help';
+export type ShellCommand = 'candle' | 'orderbook' | 'help' | 'new';
 
 export type ParsedShellInput =
   | { kind: 'chat'; message: string }
@@ -28,7 +28,7 @@ type PairPickerOption = {
   label: string;
 };
 
-const CHAT_PLACEHOLDER = 'Type a message or use /orderbook, /help';
+const CHAT_PLACEHOLDER = 'Type a message or use /orderbook, /help, /new';
 const COMMAND_PALETTE_ITEMS: CommandPaletteItem[] = [
   {
     command: 'orderbook',
@@ -39,6 +39,11 @@ const COMMAND_PALETTE_ITEMS: CommandPaletteItem[] = [
     command: 'help',
     label: '/help',
     description: 'Show the command summary in the workspace',
+  },
+  {
+    command: 'new',
+    label: '/new',
+    description: 'Clear the transcript and start a fresh chat thread',
   },
 ];
 
@@ -59,7 +64,8 @@ export function parseShellInput(input: string): ParsedShellInput | undefined {
   if (
     normalizedCommand === 'candle' ||
     normalizedCommand === 'orderbook' ||
-    normalizedCommand === 'help'
+    normalizedCommand === 'help' ||
+    normalizedCommand === 'new'
   ) {
     return {
       kind: 'command',

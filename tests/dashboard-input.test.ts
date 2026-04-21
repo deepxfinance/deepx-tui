@@ -64,6 +64,10 @@ describe('dashboard input helpers', () => {
       kind: 'command',
       command: 'help',
     });
+    expect(parseShellInput('/new')).toEqual({
+      kind: 'command',
+      command: 'new',
+    });
   });
 
   test('treats unknown slash input as chat', () => {
@@ -75,7 +79,7 @@ describe('dashboard input helpers', () => {
 
   test('renders a visible cursor for the active empty shell input', () => {
     expect(formatShellComposerLine('', 0, true)).toBe(
-      '> █ Type a message or use /orderbook, /help',
+      '> █ Type a message or use /orderbook, /help, /new',
     );
   });
 
@@ -162,10 +166,14 @@ describe('dashboard input helpers', () => {
     expect(buildCommandPaletteItems('/').map((item) => item.label)).toEqual([
       '/orderbook',
       '/help',
+      '/new',
     ]);
     expect(buildCommandPaletteItems('/can')).toEqual([]);
     expect(buildCommandPaletteItems('/ord').map((item) => item.label)).toEqual([
       '/orderbook',
+    ]);
+    expect(buildCommandPaletteItems('/ne').map((item) => item.label)).toEqual([
+      '/new',
     ]);
     expect(buildCommandPaletteItems('/unknown')).toEqual([]);
   });
@@ -175,6 +183,7 @@ describe('dashboard input helpers', () => {
     expect(shouldCommandPaletteCaptureArrows('/ord')).toBe(true);
     expect(shouldCommandPaletteCaptureArrows('/orderbook')).toBe(false);
     expect(shouldCommandPaletteCaptureArrows('/orderbook   ')).toBe(false);
+    expect(shouldCommandPaletteCaptureArrows('/new')).toBe(false);
     expect(shouldCommandPaletteCaptureArrows('buy eth')).toBe(false);
   });
 
