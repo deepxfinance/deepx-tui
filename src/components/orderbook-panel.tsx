@@ -148,7 +148,8 @@ export const OrderbookPanel: FC<OrderbookPanelProps> = ({
           <Box>
             <Box
               width={ORDERBOOK_TABLE_WIDTH}
-              marginRight={ORDERBOOK_SIDE_GAP}
+              marginRight={ORDERBOOK_SIDE_GAP - 1}
+              marginLeft={1}
               justifyContent="flex-end"
             >
               <Text color={BUY_COLOR}>BID</Text>
